@@ -1,0 +1,5 @@
+[[task]]
+  id = "generate-sql"
+  type = "short"
+  cmd = "go run github.com/sqlc-dev/sqlc/cmd/sqlc generate"
+
