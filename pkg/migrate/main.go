@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -46,7 +47,7 @@ func Migrate(ctx context.Context, dbPath string, migrationsPath string) error {
 				return fmt.Errorf("migration history has diverged from migrations folder")
 			}
 			appliedMigrations = appliedMigrations[1:]
-			fmt.Println("already applied", name)
+			log.Println("already applied", name)
 			continue
 		}
 
@@ -66,6 +67,6 @@ func Migrate(ctx context.Context, dbPath string, migrationsPath string) error {
 		if _, err := db.ExecContext(ctx, "commit"); err != nil {
 			return err
 		}
-		fmt.Println("applied", name)
+		log.Println("applied", name)
 	}
 }
