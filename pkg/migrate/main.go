@@ -69,4 +69,6 @@ func Migrate(ctx context.Context, dbPath string, migrationsPath string) error {
 		}
 		log.Println("applied", name)
 	}
+
+	return nil
 }
