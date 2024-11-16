@@ -1,5 +1,5 @@
 [[task]]
   id = "generate-sql"
   type = "short"
-  cmd = "go run github.com/sqlc-dev/sqlc/cmd/sqlc generate"
+  cmd = "SQLITE_ENABLE_LOCKING_STYLE=1 go run github.com/sqlc-dev/sqlc/cmd/sqlc generate"
 
