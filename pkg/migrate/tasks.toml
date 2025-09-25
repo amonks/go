@@ -1,5 +1,6 @@
 [[task]]
   id = "generate-sql"
   type = "short"
-  cmd = "SQLITE_ENABLE_LOCKING_STYLE=1 go run github.com/sqlc-dev/sqlc/cmd/sqlc generate"
+  env = { SQLITE_ENABLE_LOCKING_STYLE = "1" }
+  cmd = "go tool sqlc generate"
 
