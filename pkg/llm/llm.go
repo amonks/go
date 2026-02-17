@@ -25,7 +25,7 @@ func New(model string) *Client {
 }
 
 // GenerateWithSchema runs an LLM query and returns JSON-structured output based on the schema
-func (c *Client) GenerateWithSchema(prompt string, schema string) (map[string]interface{}, error) {
+func (c *Client) GenerateWithSchema(prompt string, schema string) (map[string]any, error) {
 	cmd := exec.Command("llm", "-m", c.model, "--schema", schema, prompt)
 
 	var stdout, stderr bytes.Buffer
@@ -40,7 +40,7 @@ func (c *Client) GenerateWithSchema(prompt string, schema string) (map[string]in
 	output := strings.TrimSpace(stdout.String())
 
 	// Parse the JSON output
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal([]byte(output), &result); err != nil {
 		return nil, fmt.Errorf("failed to parse LLM output as JSON: %w, output: %s", err, output)
 	}
