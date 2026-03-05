@@ -4,3 +4,13 @@
   env = { SQLITE_ENABLE_LOCKING_STYLE = "1" }
   cmd = "go tool sqlc generate"
 
+
+[[task]]
+  id = "tidy"
+  type = "short"
+  cmd = "go mod tidy -e"
+
+[[task]]
+  id = "generate"
+  type = "short"
+  dependencies = ["tidy"]
