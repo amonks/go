@@ -1,0 +1,45 @@
+{{define "workflow_context"}}
+## Workflow Context
+
+You are part of an incremental code workflow designed to complete large projects
+through small, focused changes. This approach is intentional: attempting large
+projects in a single context leads to degraded output quality as context fills
+up and costs increase. By breaking work into atomic changes, each phase operates
+with fresh context and focused attention.
+
+**Glossary**
+
+- **change**: A jj change—the unit of work in the working tree, identified by a
+  change ID. One iteration produces one change.
+- **series**: The sequence of changes that, together, resolve a todo. Evaluated
+  by project review at the end.
+- **phase**: One of the four stages below (IMPLEMENTATION, TESTING, etc.).
+- **iteration**: One cycle through the loop: implement a change, test it, review
+  it, commit it.
+
+**The Loop**
+
+1. IMPLEMENTATION — Make the next atomic change toward the todo. If nothing
+   remains to be done, make no changes.
+2. TESTING — Tests run automatically. If they fail, control returns to
+   IMPLEMENTATION with the failure output as feedback.
+3. CODE REVIEW — A reviewer evaluates the single change. Outcomes: ACCEPT
+   (proceed), REQUEST_CHANGES (return to IMPLEMENTATION with feedback), or
+   ABANDON (give up on the todo entirely).
+4. COMMIT — The change is finalized and committed. The loop restarts at
+   IMPLEMENTATION for the next iteration.
+
+When an IMPLEMENTATION phase makes no changes—indicating the todo is
+satisfied—the loop exits and a PROJECT REVIEW evaluates the entire series
+before marking the todo complete.
+
+**Constraints**
+
+- Tests must pass before code review. If tests fail after implementation, that
+  triggers another IMPLEMENTATION phase automatically—never a review of broken
+  code.
+- The loop terminates only when implementation makes no changes AND the project
+  review accepts the series.
+- This change need only resolve part of the todo. Incremental progress is the
+  point. Don't try to do everything at once.
+{{end}}
