@@ -1,3 +1,3 @@
 module monks.co/pkg/set
 
-go 1.26.1
+go 1.26.2
