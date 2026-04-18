@@ -524,3 +524,48 @@ func TestIsFileNotFoundOutput(t *testing.T) {
 		}
 	}
 }
+
+func TestFileList(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+	client := jj.New()
+	if err := client.Init(tmpDir); err != nil {
+		t.Fatalf("failed to init jj repo: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(tmpDir, ".gitignore"), []byte("ignored.txt\nbuild/\n"), 0644); err != nil {
+		t.Fatalf("write gitignore: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "a.txt"), []byte("hello"), 0644); err != nil {
+		t.Fatalf("write a.txt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "ignored.txt"), []byte("nope"), 0644); err != nil {
+		t.Fatalf("write ignored.txt: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmpDir, "build"), 0755); err != nil {
+		t.Fatalf("mkdir build: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "build", "out.txt"), []byte("out"), 0644); err != nil {
+		t.Fatalf("write build/out.txt: %v", err)
+	}
+
+	files, err := client.FileList(tmpDir)
+	if err != nil {
+		t.Fatalf("file list: %v", err)
+	}
+
+	if !slices.Contains(files, "a.txt") {
+		t.Errorf("expected a.txt in tracked files, got %v", files)
+	}
+	if !slices.Contains(files, ".gitignore") {
+		t.Errorf("expected .gitignore in tracked files, got %v", files)
+	}
+	if slices.Contains(files, "ignored.txt") {
+		t.Errorf("gitignored ignored.txt should not be listed, got %v", files)
+	}
+	for _, f := range files {
+		if strings.HasPrefix(f, "build/") || strings.HasPrefix(f, "build"+string(filepath.Separator)) {
+			t.Errorf("gitignored build/ should not be listed, got %q in %v", f, files)
+		}
+	}
+}

@@ -289,6 +289,18 @@ func (c *Client) WorkspaceForget(repoPath, workspaceName string) error {
 	return runCombinedOutput(cmd, "jj workspace forget")
 }
 
+// FileList returns the tracked files at @ in the given workspace. Paths are
+// relative to the workspace root. Gitignored files are excluded.
+func (c *Client) FileList(workspacePath string) ([]string, error) {
+	cmd := exec.Command("jj", "file", "list")
+	cmd.Dir = workspacePath
+	output, err := commandOutput(cmd, "jj file list")
+	if err != nil {
+		return nil, err
+	}
+	return splitTrimmedLines(output), nil
+}
+
 // FileShow returns the contents of a file at the given revision.
 func (c *Client) FileShow(repoPath, rev, path string) ([]byte, error) {
 	cmd := exec.Command("jj", "file", "show", "-r", rev, path)
