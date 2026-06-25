@@ -1,6 +1,6 @@
 module monks.co/pkg/migrate
 
-go 1.26.3
+go 1.26.4
 
 require modernc.org/sqlite v1.47.0
 
