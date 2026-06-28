@@ -236,6 +236,50 @@ func TestConvertMessagesToAnthropic_EmptyAssistantMessageExcluded(t *testing.T) 
 	}
 }
 
+func TestConvertToAnthropicRequest_ForcesToolChoice(t *testing.T) {
+	req := Request{
+		Messages: []Message{
+			UserMessage{
+				Role:      "user",
+				Content:   []ContentBlock{TextContent{Type: "text", Text: "hello"}},
+				Timestamp: time.Now(),
+			},
+		},
+		Tools:      []Tool{{Name: "recommend", Description: "pick movies"}},
+		ToolChoice: "recommend",
+	}
+
+	anthropicReq := convertToAnthropicRequest(Model{ID: "claude"}, req, StreamOptions{})
+
+	if anthropicReq.ToolChoice == nil {
+		t.Fatal("expected tool_choice to be set when Request.ToolChoice is non-empty")
+	}
+	if anthropicReq.ToolChoice.Type != "tool" {
+		t.Errorf("tool_choice type = %q, want %q", anthropicReq.ToolChoice.Type, "tool")
+	}
+	if anthropicReq.ToolChoice.Name != "recommend" {
+		t.Errorf("tool_choice name = %q, want %q", anthropicReq.ToolChoice.Name, "recommend")
+	}
+}
+
+func TestConvertToAnthropicRequest_NoToolChoiceByDefault(t *testing.T) {
+	req := Request{
+		Messages: []Message{
+			UserMessage{
+				Role:      "user",
+				Content:   []ContentBlock{TextContent{Type: "text", Text: "hello"}},
+				Timestamp: time.Now(),
+			},
+		},
+		Tools: []Tool{{Name: "recommend"}},
+	}
+
+	anthropicReq := convertToAnthropicRequest(Model{ID: "claude"}, req, StreamOptions{})
+	if anthropicReq.ToolChoice != nil {
+		t.Errorf("expected no tool_choice by default, got %+v", anthropicReq.ToolChoice)
+	}
+}
+
 func TestConvertToAnthropicRequest_AddsCacheControlMarkers(t *testing.T) {
 	req := Request{
 		System:   []SystemBlock{{Text: "system prompt", CacheBreakpoint: true}},
