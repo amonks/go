@@ -21,9 +21,17 @@ type anthropicRequest struct {
 	Messages    []anthropicMessage `json:"messages"`
 	System      []anthropicContent `json:"system,omitempty"`
 	Stream      bool               `json:"stream"`
-	Tools       []anthropicTool    `json:"tools,omitempty"`
-	Temperature *float64           `json:"temperature,omitempty"`
-	Thinking    *anthropicThinking `json:"thinking,omitempty"`
+	Tools       []anthropicTool      `json:"tools,omitempty"`
+	ToolChoice  *anthropicToolChoice `json:"tool_choice,omitempty"`
+	Temperature *float64             `json:"temperature,omitempty"`
+	Thinking    *anthropicThinking   `json:"thinking,omitempty"`
+}
+
+// anthropicToolChoice forces the model to call a specific tool. Type is
+// "tool" with Name set to the tool to force.
+type anthropicToolChoice struct {
+	Type string `json:"type"`
+	Name string `json:"name,omitempty"`
 }
 
 type anthropicThinking struct {
@@ -214,6 +222,11 @@ func convertToAnthropicRequest(model Model, req Request, opts StreamOptions) ant
 			Description: tool.Description,
 			InputSchema: GenerateSchema(tool.Parameters),
 		})
+	}
+
+	// Force a specific tool when requested, for schema-constrained output.
+	if req.ToolChoice != "" {
+		anthropicReq.ToolChoice = &anthropicToolChoice{Type: "tool", Name: req.ToolChoice}
 	}
 
 	applyAnthropicCaching(&anthropicReq, req.System, opts.CacheRetention)

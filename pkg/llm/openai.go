@@ -21,6 +21,7 @@ type openAICompletionsRequest struct {
 	Temperature         *float64             `json:"temperature,omitempty"`
 	Stream              bool                 `json:"stream"`
 	Tools               []openAITool         `json:"tools,omitempty"`
+	ToolChoice          any                  `json:"tool_choice,omitempty"`
 	StreamOptions       *openAIStreamOptions `json:"stream_options,omitempty"`
 }
 
@@ -201,6 +202,14 @@ func convertToOpenAIRequest(model Model, req Request, opts StreamOptions) openAI
 				Parameters:  GenerateSchema(tool.Parameters),
 			},
 		})
+	}
+
+	// Force a specific tool when requested, for schema-constrained output.
+	if req.ToolChoice != "" {
+		openAIReq.ToolChoice = map[string]any{
+			"type":     "function",
+			"function": map[string]any{"name": req.ToolChoice},
+		}
 	}
 
 	return openAIReq
@@ -492,6 +501,7 @@ type responsesAPIRequest struct {
 	Temperature     *float64           `json:"temperature,omitempty"`
 	Stream          bool               `json:"stream"`
 	Tools           []responsesAPITool `json:"tools,omitempty"`
+	ToolChoice      any                `json:"tool_choice,omitempty"`
 }
 
 type responsesContentPart struct {
@@ -652,6 +662,11 @@ func convertToResponsesRequest(model Model, req Request, opts StreamOptions) res
 			Description: tool.Description,
 			Parameters:  GenerateSchema(tool.Parameters),
 		})
+	}
+
+	// Force a specific tool when requested, for schema-constrained output.
+	if req.ToolChoice != "" {
+		responsesReq.ToolChoice = map[string]any{"type": "function", "name": req.ToolChoice}
 	}
 
 	return responsesReq

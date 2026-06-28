@@ -166,6 +166,13 @@ type Request struct {
 	System   []SystemBlock
 	Messages []Message // UserMessage, AssistantMessage, or ToolResultMessage
 	Tools    []Tool
+
+	// ToolChoice, when non-empty, forces the model to call the named tool
+	// instead of leaving the choice to the model. Use this to get
+	// schema-constrained structured output: define a single tool whose
+	// parameters describe the desired shape, then force it. Empty leaves
+	// tool use up to the model ("auto").
+	ToolChoice string
 }
 
 // SystemBlock is a system prompt segment with optional cache breakpoint metadata.
