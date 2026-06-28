@@ -3,6 +3,9 @@ package llm
 import (
 	"context"
 	"fmt"
+	"log"
+	"strings"
+	"time"
 )
 
 // StreamEvent is an interface implemented by all stream event types.
@@ -74,6 +77,13 @@ type StreamHandle struct {
 	Events <-chan StreamEvent
 	done   chan AssistantMessage
 	errCh  chan error
+
+	// Set by Stream so Wait can log the completion with model and duration.
+	// Zero when the handle was built directly via NewStreamHandle (e.g. by a
+	// wrapper package), in which case Wait skips completion logging.
+	model string
+	api   API
+	start time.Time
 }
 
 // Wait blocks until the stream completes and returns the final message.
@@ -84,8 +94,14 @@ func (h *StreamHandle) Wait() (AssistantMessage, error) {
 
 	select {
 	case msg := <-h.done:
+		if !h.start.IsZero() {
+			logInvocationDone(h, msg)
+		}
 		return msg, nil
 	case err := <-h.errCh:
+		if !h.start.IsZero() {
+			logInvocationError(h.model, h.api, err, time.Since(h.start))
+		}
 		return AssistantMessage{}, err
 	}
 }
@@ -117,14 +133,78 @@ func Stream(ctx context.Context, model Model, req Request, opts StreamOptions) (
 	if opts.CacheRetention == "" {
 		opts.CacheRetention = CacheShort
 	}
+
+	start := time.Now()
+	logInvocationStart(model, req, opts)
+
+	var (
+		handle *StreamHandle
+		err    error
+	)
 	switch model.API {
 	case APIAnthropicMessages:
-		return streamAnthropic(ctx, model, req, opts)
+		handle, err = streamAnthropic(ctx, model, req, opts)
 	case APIOpenAICompletions:
-		return streamOpenAICompletions(ctx, model, req, opts)
+		handle, err = streamOpenAICompletions(ctx, model, req, opts)
 	case APIOpenAIResponses:
-		return streamOpenAIResponses(ctx, model, req, opts)
+		handle, err = streamOpenAIResponses(ctx, model, req, opts)
 	default:
-		return nil, fmt.Errorf("unsupported API: %s", model.API)
+		err = fmt.Errorf("unsupported API: %s", model.API)
 	}
+	if err != nil {
+		// Request never got off the ground (bad config, non-2xx, network).
+		logInvocationError(model.ID, model.API, err, time.Since(start))
+		return nil, err
+	}
+
+	// Stamp the handle so Wait can log the completion with duration.
+	handle.model = model.ID
+	handle.api = model.API
+	handle.start = start
+	return handle, nil
+}
+
+// Invocation logging. One line when a call starts and one when it finishes,
+// to stderr via the standard logger, so operators can confirm LLM calls are
+// happening and see their token usage and latency without a debugger.
+
+func logInvocationStart(model Model, req Request, opts StreamOptions) {
+	maxTokens := 0
+	if opts.MaxTokens != nil {
+		maxTokens = *opts.MaxTokens
+	}
+	toolChoice := opts.toolChoiceLabel(req)
+	log.Printf("llm: → %s (%s) maxTokens=%d tools=%s%s",
+		model.ID, model.API, maxTokens, toolNames(req.Tools), toolChoice)
+}
+
+func logInvocationDone(h *StreamHandle, msg AssistantMessage) {
+	u := msg.Usage
+	log.Printf("llm: ← %s (%s) stop=%s in=%d out=%d cacheR=%d cacheW=%d dur=%s",
+		h.model, h.api, msg.StopReason, u.Input, u.Output, u.CacheRead, u.CacheWrite,
+		time.Since(h.start).Round(time.Millisecond))
+}
+
+func logInvocationError(modelID string, api API, err error, dur time.Duration) {
+	log.Printf("llm: ✗ %s (%s) error: %v dur=%s", modelID, api, err, dur.Round(time.Millisecond))
+}
+
+// toolChoiceLabel renders the forced-tool suffix, if any. It hangs off
+// StreamOptions only for symmetry with logInvocationStart's signature.
+func (StreamOptions) toolChoiceLabel(req Request) string {
+	if req.ToolChoice == "" {
+		return ""
+	}
+	return " toolChoice=" + req.ToolChoice
+}
+
+func toolNames(tools []Tool) string {
+	if len(tools) == 0 {
+		return "[]"
+	}
+	names := make([]string, len(tools))
+	for i, t := range tools {
+		names[i] = t.Name
+	}
+	return "[" + strings.Join(names, ",") + "]"
 }
