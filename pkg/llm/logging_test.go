@@ -35,7 +35,7 @@ func TestLogInvocationStart_DescribesRequest(t *testing.T) {
 			Tools:      []Tool{{Name: "recommend"}},
 			ToolChoice: "recommend",
 		},
-		StreamOptions{MaxTokens: ptrInt(4000)},
+		StreamOptions{MaxTokens: new(4000)},
 	)
 
 	out := buf.String()
@@ -76,7 +76,8 @@ func TestLogInvocationError_ReportsError(t *testing.T) {
 	}
 }
 
-func ptrInt(i int) *int { return &i }
+//go:fix inline
+func ptrInt(i int) *int { return new(i) }
 
 type errString string
 
