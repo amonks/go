@@ -76,9 +76,6 @@ func TestLogInvocationError_ReportsError(t *testing.T) {
 	}
 }
 
-//go:fix inline
-func ptrInt(i int) *int { return new(i) }
-
 type errString string
 
 func (e errString) Error() string { return string(e) }
