@@ -1,6 +1,6 @@
 module monks.co/pkg/table
 
-go 1.26.4
+go 1.26.5
 
 require (
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
