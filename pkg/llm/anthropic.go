@@ -473,6 +473,14 @@ func processAnthropicStream(ctx context.Context, body io.ReadCloser, model Model
 	// Track content blocks and their JSON accumulation for tool calls
 	var toolCallJSONs = make(map[int]string)
 
+	// The API's content indices count every block it streams, including
+	// types we don't accumulate (e.g. redacted_thinking). Map the server's
+	// index to our position in partial.Content so an unrecognized block
+	// can't desync every block after it — before this map, a leading
+	// redacted_thinking block silently shifted the tool_use index and the
+	// tool call's arguments were dropped.
+	var blockPositions = make(map[int]int)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -525,22 +533,24 @@ func processAnthropicStream(ctx context.Context, body io.ReadCloser, model Model
 				switch event.ContentBlock.Type {
 				case "text":
 					partial.Content = append(partial.Content, TextContent{Type: "text", Text: ""})
+					blockPositions[event.Index] = len(partial.Content) - 1
 				case "thinking":
 					partial.Content = append(partial.Content, ThinkingContent{Type: "thinking", Thinking: ""})
+					blockPositions[event.Index] = len(partial.Content) - 1
 				case "tool_use":
 					partial.Content = append(partial.Content, ToolCall{
 						Type: "toolCall",
 						ID:   event.ContentBlock.ID,
 						Name: event.ContentBlock.Name,
 					})
+					blockPositions[event.Index] = len(partial.Content) - 1
 					toolCallJSONs[event.Index] = ""
 				}
 			}
 
 		case "content_block_delta":
 			if event.Delta != nil {
-				idx := event.Index
-				if idx < len(partial.Content) {
+				if idx, ok := blockPositions[event.Index]; ok {
 					switch event.Delta.Type {
 					case "text_delta":
 						if tc, ok := partial.Content[idx].(TextContent); ok {
@@ -555,18 +565,17 @@ func processAnthropicStream(ctx context.Context, body io.ReadCloser, model Model
 							events <- ThinkingDeltaEvent{ContentIndex: idx, Delta: event.Delta.Thinking, Partial: partial}
 						}
 					case "input_json_delta":
-						toolCallJSONs[idx] += event.Delta.PartialJSON
+						toolCallJSONs[event.Index] += event.Delta.PartialJSON
 						events <- ToolCallDeltaEvent{ContentIndex: idx, Delta: event.Delta.PartialJSON, Partial: partial}
 					}
 				}
 			}
 
 		case "content_block_stop":
-			idx := event.Index
-			if idx < len(partial.Content) {
+			if idx, ok := blockPositions[event.Index]; ok {
 				if tc, ok := partial.Content[idx].(ToolCall); ok {
 					// Parse accumulated JSON
-					jsonStr := toolCallJSONs[idx]
+					jsonStr := toolCallJSONs[event.Index]
 					if jsonStr != "" {
 						var args map[string]any
 						if err := json.Unmarshal([]byte(jsonStr), &args); err == nil {
