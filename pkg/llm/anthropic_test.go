@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"strings"
 	"testing"
@@ -349,6 +350,97 @@ func TestConvertToAnthropicRequest_AddsCacheControlMarkers(t *testing.T) {
 				t.Fatal("expected no cache_control on user message content")
 			}
 			break
+		}
+	})
+}
+
+func TestConvertToAnthropicRequest_AdaptiveThinkingModels(t *testing.T) {
+	req := Request{
+		Messages: []Message{
+			UserMessage{Role: "user", Content: []ContentBlock{TextContent{Type: "text", Text: "hi"}}},
+		},
+	}
+
+	t.Run("claude 5 era models use adaptive thinking with effort", func(t *testing.T) {
+		for _, id := range []string{
+			"claude-fable-5",
+			"claude-mythos-5",
+			"claude-opus-5",
+			"claude-sonnet-5",
+			"claude-opus-4-6",
+			"claude-opus-4-7",
+			"claude-opus-4-8",
+			"claude-sonnet-4-6",
+		} {
+			anthropicReq := convertToAnthropicRequest(Model{ID: id}, req, StreamOptions{ThinkingLevel: ThinkingMedium})
+
+			if anthropicReq.Thinking == nil || anthropicReq.Thinking.Type != "adaptive" {
+				t.Fatalf("%s: expected thinking type adaptive, got %+v", id, anthropicReq.Thinking)
+			}
+			if anthropicReq.Thinking.BudgetTokens != 0 {
+				t.Fatalf("%s: expected no budget_tokens, got %d", id, anthropicReq.Thinking.BudgetTokens)
+			}
+			if anthropicReq.OutputConfig == nil || anthropicReq.OutputConfig.Effort != "medium" {
+				t.Fatalf("%s: expected output_config effort medium, got %+v", id, anthropicReq.OutputConfig)
+			}
+			if anthropicReq.Temperature != nil {
+				t.Fatalf("%s: expected no temperature (rejected on this model family), got %v", id, *anthropicReq.Temperature)
+			}
+		}
+	})
+
+	t.Run("budget_tokens omitted from adaptive thinking JSON", func(t *testing.T) {
+		anthropicReq := convertToAnthropicRequest(Model{ID: "claude-sonnet-5"}, req, StreamOptions{ThinkingLevel: ThinkingMedium})
+		body, err := json.Marshal(anthropicReq)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(body), "budget_tokens") {
+			t.Fatalf("expected budget_tokens absent from request JSON, got %s", body)
+		}
+	})
+
+	t.Run("effort levels map from thinking levels", func(t *testing.T) {
+		for level, want := range map[ThinkingLevel]string{
+			ThinkingMinimal: "low",
+			ThinkingLow:     "low",
+			ThinkingMedium:  "medium",
+			ThinkingHigh:    "high",
+			ThinkingXHigh:   "xhigh",
+		} {
+			anthropicReq := convertToAnthropicRequest(Model{ID: "claude-sonnet-5"}, req, StreamOptions{ThinkingLevel: level})
+			if anthropicReq.OutputConfig == nil || anthropicReq.OutputConfig.Effort != want {
+				t.Fatalf("level %s: expected effort %q, got %+v", level, want, anthropicReq.OutputConfig)
+			}
+		}
+	})
+
+	t.Run("older models keep enabled thinking with budget", func(t *testing.T) {
+		for _, id := range []string{"claude-haiku-4-5", "claude-sonnet-4-5", "claude-opus-4-5", "claude"} {
+			anthropicReq := convertToAnthropicRequest(Model{ID: id}, req, StreamOptions{ThinkingLevel: ThinkingMedium})
+
+			if anthropicReq.Thinking == nil || anthropicReq.Thinking.Type != "enabled" {
+				t.Fatalf("%s: expected thinking type enabled, got %+v", id, anthropicReq.Thinking)
+			}
+			if anthropicReq.Thinking.BudgetTokens != 10000 {
+				t.Fatalf("%s: expected budget 10000, got %d", id, anthropicReq.Thinking.BudgetTokens)
+			}
+			if anthropicReq.OutputConfig != nil {
+				t.Fatalf("%s: expected no output_config, got %+v", id, anthropicReq.OutputConfig)
+			}
+			if anthropicReq.Temperature == nil || *anthropicReq.Temperature != 1 {
+				t.Fatalf("%s: expected temperature 1 for enabled thinking, got %v", id, anthropicReq.Temperature)
+			}
+		}
+	})
+
+	t.Run("thinking off omits thinking and output_config", func(t *testing.T) {
+		anthropicReq := convertToAnthropicRequest(Model{ID: "claude-sonnet-5"}, req, StreamOptions{ThinkingLevel: ThinkingOff})
+		if anthropicReq.Thinking != nil {
+			t.Fatalf("expected no thinking config, got %+v", anthropicReq.Thinking)
+		}
+		if anthropicReq.OutputConfig != nil {
+			t.Fatalf("expected no output_config, got %+v", anthropicReq.OutputConfig)
 		}
 	})
 }

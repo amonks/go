@@ -25,6 +25,13 @@ type anthropicRequest struct {
 	ToolChoice  *anthropicToolChoice `json:"tool_choice,omitempty"`
 	Temperature *float64             `json:"temperature,omitempty"`
 	Thinking    *anthropicThinking   `json:"thinking,omitempty"`
+	OutputConfig *anthropicOutputConfig `json:"output_config,omitempty"`
+}
+
+// anthropicOutputConfig carries the effort level for models that use
+// adaptive thinking (Claude 4.6 and later).
+type anthropicOutputConfig struct {
+	Effort string `json:"effort,omitempty"`
 }
 
 // anthropicToolChoice forces the model to call a specific tool. Type is
@@ -36,7 +43,7 @@ type anthropicToolChoice struct {
 
 type anthropicThinking struct {
 	Type         string `json:"type"`
-	BudgetTokens int    `json:"budget_tokens"`
+	BudgetTokens int    `json:"budget_tokens,omitempty"`
 }
 
 type anthropicMessage struct {
@@ -200,16 +207,26 @@ func convertToAnthropicRequest(model Model, req Request, opts StreamOptions) ant
 		anthropicReq.Temperature = opts.Temperature
 	}
 
-	// Set thinking if enabled
+	// Set thinking if enabled. Claude 4.6-era and later models reject the
+	// old {type: "enabled", budget_tokens: N} shape with a 400 — they take
+	// {type: "adaptive"} with an output_config effort level instead, and
+	// also reject explicit sampling parameters like temperature.
 	if opts.ThinkingLevel != "" && opts.ThinkingLevel != ThinkingOff {
-		budget := thinkingBudget(opts.ThinkingLevel)
-		anthropicReq.Thinking = &anthropicThinking{
-			Type:         "enabled",
-			BudgetTokens: budget,
+		if modelUsesAdaptiveThinking(model.ID) {
+			anthropicReq.Thinking = &anthropicThinking{Type: "adaptive"}
+			anthropicReq.OutputConfig = &anthropicOutputConfig{
+				Effort: effortLevel(opts.ThinkingLevel),
+			}
+		} else {
+			budget := thinkingBudget(opts.ThinkingLevel)
+			anthropicReq.Thinking = &anthropicThinking{
+				Type:         "enabled",
+				BudgetTokens: budget,
+			}
+			// Temperature must be 1 for thinking mode
+			temp := 1.0
+			anthropicReq.Temperature = &temp
 		}
-		// Temperature must be 1 for thinking mode
-		temp := 1.0
-		anthropicReq.Temperature = &temp
 	}
 
 	// Convert messages
@@ -283,6 +300,46 @@ func shouldEnableAnthropicCaching(retention CacheRetention) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// adaptiveThinkingModelPrefixes lists the Anthropic model families that use
+// adaptive thinking. On the 4.6 family the old enabled/budget_tokens shape is
+// deprecated; on everything newer (4.7+, Sonnet 5, Opus 5, Fable/Mythos 5) it
+// is rejected with a 400, as are explicit sampling parameters.
+var adaptiveThinkingModelPrefixes = []string{
+	"claude-fable-5",
+	"claude-mythos-5",
+	"claude-opus-5",
+	"claude-sonnet-5",
+	"claude-opus-4-6",
+	"claude-opus-4-7",
+	"claude-opus-4-8",
+	"claude-sonnet-4-6",
+}
+
+func modelUsesAdaptiveThinking(modelID string) bool {
+	for _, prefix := range adaptiveThinkingModelPrefixes {
+		if strings.HasPrefix(modelID, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// effortLevel maps a ThinkingLevel onto the adaptive-thinking effort scale.
+func effortLevel(level ThinkingLevel) string {
+	switch level {
+	case ThinkingMinimal, ThinkingLow:
+		return "low"
+	case ThinkingMedium:
+		return "medium"
+	case ThinkingHigh:
+		return "high"
+	case ThinkingXHigh:
+		return "xhigh"
+	default:
+		return "medium"
 	}
 }
 
