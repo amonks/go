@@ -444,3 +444,51 @@ func TestConvertToAnthropicRequest_AdaptiveThinkingModels(t *testing.T) {
 		}
 	})
 }
+
+func TestProcessAnthropicStream_UnknownBlockTypeDoesNotShiftIndices(t *testing.T) {
+	// A block type the parser doesn't recognize (e.g. redacted_thinking)
+	// must not desync the server's content indices from our accumulated
+	// content — the tool call at index 1 must still get its arguments.
+	stream := strings.Join([]string{
+		`data: {"type":"message_start","message":{"usage":{"input_tokens":10,"output_tokens":1}}}`,
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"redacted_thinking"}}`,
+		`data: {"type":"content_block_stop","index":0}`,
+		`data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_1","name":"recommend"}}`,
+		`data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"recommendations\":"}}`,
+		`data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"[{\"number\":3,\"reason\":\"x\"}]}"}}`,
+		`data: {"type":"content_block_stop","index":1}`,
+		`data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}`,
+		`data: {"type":"message_stop"}`,
+		"",
+	}, "\n")
+
+	body := io.NopCloser(strings.NewReader(stream))
+	model := Model{ID: "claude-sonnet-5", API: APIAnthropicMessages, Provider: "test"}
+
+	events := make(chan StreamEvent, 100)
+	done := make(chan AssistantMessage, 1)
+	errCh := make(chan error, 1)
+
+	go processAnthropicStream(context.Background(), body, model, events, done, errCh)
+	for range events {
+	}
+
+	select {
+	case msg := <-done:
+		var tool *ToolCall
+		for _, block := range msg.Content {
+			if tc, ok := block.(ToolCall); ok {
+				tool = &tc
+			}
+		}
+		if tool == nil {
+			t.Fatalf("expected a tool call in content, got %#v", msg.Content)
+		}
+		recs, ok := tool.Arguments["recommendations"].([]any)
+		if !ok || len(recs) != 1 {
+			t.Fatalf("expected parsed tool arguments, got %#v", tool.Arguments)
+		}
+	case err := <-errCh:
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
