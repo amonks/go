@@ -55,7 +55,18 @@ func (c *Client) GitPush(workspacePath, bookmark string) error {
 		return runCombinedOutput(cmd, "jj git push")
 	}
 	if m := nonTrackingPattern(bookmark).FindStringSubmatch(err.Error()); m != nil {
+		// Tracking merges the local and remote positions with no
+		// common base, which conflicts the bookmark whenever they
+		// differ. The local position is the caller's intent, so
+		// capture it first and re-set after tracking.
+		pos, err := c.CommitIDAt(workspacePath, bookmark)
+		if err != nil {
+			return err
+		}
 		if err := c.BookmarkTrack(workspacePath, bookmark, m[1]); err != nil {
+			return err
+		}
+		if err := c.BookmarkSet(workspacePath, bookmark, pos); err != nil {
 			return err
 		}
 		return c.gitPushOnce(workspacePath, bookmark)
