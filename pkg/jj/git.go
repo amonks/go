@@ -2,6 +2,7 @@ package jj
 
 import (
 	"os/exec"
+	"strings"
 )
 
 // GitRemoteAdd adds a named git remote to the repository.
@@ -35,10 +36,21 @@ func (c *Client) GitFetch(workspacePath string) error {
 // GitPush pushes the named bookmark to the remote. It fails if the
 // remote bookmark has moved since the last fetch (jj refuses to push
 // over unexpected remote changes), which callers use to detect races.
+//
+// Pushing a bookmark that doesn't exist on the remote yet needs
+// --allow-new on older jj, while newer jj has removed the flag and
+// allows new bookmarks by default. Try the plain push first and retry
+// with the flag only when the error asks for it, so both versions work.
 func (c *Client) GitPush(workspacePath, bookmark string) error {
-	cmd := exec.Command("jj", "git", "push", "--bookmark", bookmark, "--allow-new")
+	cmd := exec.Command("jj", "git", "push", "--bookmark", bookmark)
 	cmd.Dir = workspacePath
-	return runCombinedOutput(cmd, "jj git push")
+	err := runCombinedOutput(cmd, "jj git push")
+	if err != nil && strings.Contains(err.Error(), "--allow-new") {
+		cmd := exec.Command("jj", "git", "push", "--bookmark", bookmark, "--allow-new")
+		cmd.Dir = workspacePath
+		return runCombinedOutput(cmd, "jj git push")
+	}
+	return err
 }
 
 // LogTemplate returns the output of jj log over the given revset with
