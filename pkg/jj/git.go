@@ -14,6 +14,11 @@ func (c *Client) GitRemoteAdd(workspacePath, name, url string) error {
 }
 
 // GitClone clones a git repository into dest as a jj repo.
+//
+// Post-clone state varies by jj version: older jj tracks the default
+// bookmark and checks it out; newer jj leaves it untracked and may
+// leave the working copy on root. Callers that need a working checkout
+// should follow with BookmarkTrack and a new change on the bookmark.
 func (c *Client) GitClone(url, dest string) error {
 	cmd := exec.Command("jj", "git", "clone", url, dest)
 	return runCombinedOutput(cmd, "jj git clone")
