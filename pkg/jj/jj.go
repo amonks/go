@@ -360,6 +360,14 @@ func (c *Client) Squash(workspacePath string) error {
 	return runCombinedOutput(cmd, "jj squash")
 }
 
+// Abandon abandons all revisions in the given revset. Abandoning an empty
+// revset is a no-op.
+func (c *Client) Abandon(workspacePath, revset string) error {
+	cmd := exec.Command("jj", "abandon", "-r", revset)
+	cmd.Dir = workspacePath
+	return runCombinedOutput(cmd, "jj abandon")
+}
+
 // SeriesLog returns the jj log for the patch series from fork_point(@|main) to @-.
 // The output includes commit descriptions and diff stats.
 // Returns an empty string if there are no commits in the series (including when
