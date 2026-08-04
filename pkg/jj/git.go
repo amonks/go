@@ -2,6 +2,7 @@ package jj
 
 import (
 	"os/exec"
+	"regexp"
 	"strings"
 )
 
@@ -37,20 +38,41 @@ func (c *Client) GitFetch(workspacePath string) error {
 // remote bookmark has moved since the last fetch (jj refuses to push
 // over unexpected remote changes), which callers use to detect races.
 //
-// Pushing a bookmark that doesn't exist on the remote yet needs
-// --allow-new on older jj, while newer jj has removed the flag and
-// allows new bookmarks by default. Try the plain push first and retry
-// with the flag only when the error asks for it, so both versions work.
+// It adapts to jj's bookmark-tracking behavior across versions.
+// Pushing a bookmark new to the remote needs --allow-new on older jj,
+// while newer jj has removed the flag and allows new bookmarks by
+// default. Newer jj also no longer auto-tracks remote bookmarks, so
+// pushing an untracked local bookmark over an existing remote one is
+// refused; GitPush tracks it and retries.
 func (c *Client) GitPush(workspacePath, bookmark string) error {
-	cmd := exec.Command("jj", "git", "push", "--bookmark", bookmark)
-	cmd.Dir = workspacePath
-	err := runCombinedOutput(cmd, "jj git push")
-	if err != nil && strings.Contains(err.Error(), "--allow-new") {
+	err := c.gitPushOnce(workspacePath, bookmark)
+	if err == nil {
+		return nil
+	}
+	if strings.Contains(err.Error(), "--allow-new") {
 		cmd := exec.Command("jj", "git", "push", "--bookmark", bookmark, "--allow-new")
 		cmd.Dir = workspacePath
 		return runCombinedOutput(cmd, "jj git push")
 	}
+	if m := nonTrackingPattern(bookmark).FindStringSubmatch(err.Error()); m != nil {
+		if err := c.BookmarkTrack(workspacePath, bookmark, m[1]); err != nil {
+			return err
+		}
+		return c.gitPushOnce(workspacePath, bookmark)
+	}
 	return err
+}
+
+func (c *Client) gitPushOnce(workspacePath, bookmark string) error {
+	cmd := exec.Command("jj", "git", "push", "--bookmark", bookmark)
+	cmd.Dir = workspacePath
+	return runCombinedOutput(cmd, "jj git push")
+}
+
+// nonTrackingPattern matches jj's refusal to push an untracked local
+// bookmark over an existing remote one, capturing the remote name.
+func nonTrackingPattern(bookmark string) *regexp.Regexp {
+	return regexp.MustCompile(`Non-tracking remote bookmark ` + regexp.QuoteMeta(bookmark) + `@(\S+) exists`)
 }
 
 // LogTemplate returns the output of jj log over the given revset with

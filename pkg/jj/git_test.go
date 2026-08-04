@@ -117,6 +117,55 @@ func TestGitPush_RejectsStaleBookmark(t *testing.T) {
 	}
 }
 
+func TestGitPush_HealsNonTracking(t *testing.T) {
+	origin := initBareOrigin(t)
+
+	// Repo A creates main on the remote.
+	repoA, client := initRepoWithOrigin(t, origin)
+	if err := client.Commit(repoA, "base"); err != nil {
+		t.Fatalf("failed to commit: %v", err)
+	}
+	if err := client.BookmarkCreate(repoA, "main", "@-"); err != nil {
+		t.Fatalf("failed to create bookmark: %v", err)
+	}
+	if err := client.GitPush(repoA, "main"); err != nil {
+		t.Fatalf("failed to push: %v", err)
+	}
+
+	// Repo B fetches but does NOT track main, sets a local main, and
+	// pushes. GitPush must track and retry rather than fail.
+	repoB, _ := initRepoWithOrigin(t, origin)
+	if err := client.GitFetch(repoB); err != nil {
+		t.Fatalf("failed to fetch: %v", err)
+	}
+	if _, err := client.NewChange(repoB, "main@origin"); err != nil {
+		t.Fatalf("failed to create change: %v", err)
+	}
+	if err := client.Commit(repoB, "untracked work"); err != nil {
+		t.Fatalf("failed to commit: %v", err)
+	}
+	if err := client.BookmarkSet(repoB, "main", "@-"); err != nil {
+		t.Fatalf("failed to set bookmark: %v", err)
+	}
+	if err := client.GitPush(repoB, "main"); err != nil {
+		t.Fatalf("expected push to heal non-tracking bookmark, got %v", err)
+	}
+
+	// The push landed on the remote.
+	check := t.TempDir()
+	check, _ = filepath.EvalSymlinks(check)
+	if err := jj.New().GitClone(origin, check); err != nil {
+		t.Fatal(err)
+	}
+	desc, err := client.DescriptionAt(check, "trunk()")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(desc, "untracked work") {
+		t.Errorf("expected origin main at %q, got %q", "untracked work", desc)
+	}
+}
+
 func TestGitClone(t *testing.T) {
 	origin := initBareOrigin(t)
 
