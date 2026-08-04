@@ -569,3 +569,52 @@ func TestFileList(t *testing.T) {
 		}
 	}
 }
+
+func TestAbandon(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+	client := jj.New()
+
+	if err := client.Init(tmpDir); err != nil {
+		t.Fatalf("failed to init jj repo: %v", err)
+	}
+
+	// Create a described change with content, then an empty child.
+	if err := os.WriteFile(filepath.Join(tmpDir, "a.txt"), []byte("hello"), 0644); err != nil {
+		t.Fatalf("write a.txt: %v", err)
+	}
+	if err := client.Commit(tmpDir, "change to abandon"); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	// Abandon everything from root to @: the described change disappears.
+	if err := client.Abandon(tmpDir, "root()..@"); err != nil {
+		t.Fatalf("abandon: %v", err)
+	}
+
+	desc, err := client.DescriptionAt(tmpDir, "@")
+	if err != nil {
+		t.Fatalf("description: %v", err)
+	}
+	if desc != "" {
+		t.Errorf("expected empty description after abandon, got %q", desc)
+	}
+	if _, err := os.Stat(filepath.Join(tmpDir, "a.txt")); !os.IsNotExist(err) {
+		t.Errorf("expected a.txt to be gone after abandon, stat err: %v", err)
+	}
+}
+
+func TestAbandon_EmptyRevset(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+	client := jj.New()
+
+	if err := client.Init(tmpDir); err != nil {
+		t.Fatalf("failed to init jj repo: %v", err)
+	}
+
+	// Abandoning an empty revset is a no-op, not an error.
+	if err := client.Abandon(tmpDir, "none()"); err != nil {
+		t.Errorf("abandon of empty revset should succeed, got %v", err)
+	}
+}
