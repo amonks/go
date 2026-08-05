@@ -173,6 +173,73 @@ func TestBaselineFreshDB(t *testing.T) {
 	}
 }
 
+// A replicated database that has never held app data still carries
+// litestream's bookkeeping tables and pkg/database's heartbeat. Those must
+// not make it look like an existing database, or baseline migrations get
+// recorded without executing and the app's tables are never created.
+func TestInfrastructureTablesDoNotCountAsExisting(t *testing.T) {
+	db := openTestDB(t)
+
+	for _, ddl := range []string{
+		"CREATE TABLE _litestream_seq (id INTEGER PRIMARY KEY, seq INTEGER);",
+		"CREATE TABLE _litestream_lock (id INTEGER);",
+		"CREATE TABLE _monks_replication_heartbeat (id INTEGER PRIMARY KEY, at TEXT);",
+	} {
+		if _, err := db.Exec(ddl); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	migrations := makeFS(map[string]string{
+		"migrations/001_create_users.sql": "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);",
+	})
+
+	err := migrate.Run(context.Background(), migrate.Config{
+		DB:       db,
+		FS:       migrations,
+		Dir:      "migrations",
+		Baseline: []string{"001_create_users.sql"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var count int
+	if err := db.QueryRow("SELECT count(*) FROM users").Scan(&count); err != nil {
+		t.Fatal("users table should exist:", err)
+	}
+}
+
+// Infrastructure tables alongside real app tables still mean an existing
+// database — the baseline must not re-execute over live data.
+func TestInfrastructureTablesAlongsideAppTables(t *testing.T) {
+	db := openTestDB(t)
+
+	for _, ddl := range []string{
+		"CREATE TABLE _litestream_seq (id INTEGER PRIMARY KEY, seq INTEGER);",
+		"CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);",
+	} {
+		if _, err := db.Exec(ddl); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	migrations := makeFS(map[string]string{
+		// Would fail if executed: users already exists.
+		"migrations/001_create_users.sql": "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);",
+	})
+
+	err := migrate.Run(context.Background(), migrate.Config{
+		DB:       db,
+		FS:       migrations,
+		Dir:      "migrations",
+		Baseline: []string{"001_create_users.sql"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDeletedMigration(t *testing.T) {
 	db := openTestDB(t)
 

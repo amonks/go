@@ -113,9 +113,18 @@ func initTrackingTable(ctx context.Context, db *sql.DB) (isExisting bool, err er
 		return false, nil // table already exists, not first run
 	}
 
-	// Check if there are other user tables (existing database)
+	// Check if there are other user tables (existing database). Tables the
+	// infrastructure creates on its own don't count: every replicated
+	// database carries litestream's bookkeeping and pkg/database's
+	// heartbeat, so counting those would make a database that has never
+	// held app data look like an existing one, and baseline files would be
+	// recorded without ever creating the app's tables.
 	err = db.QueryRowContext(ctx,
-		`SELECT count(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`,
+		`SELECT count(*) FROM sqlite_master
+		 WHERE type='table'
+		   AND name NOT LIKE 'sqlite_%'
+		   AND name NOT LIKE '\_litestream\_%' ESCAPE '\'
+		   AND name NOT LIKE '\_monks\_%' ESCAPE '\'`,
 	).Scan(&count)
 	if err != nil {
 		return false, err
