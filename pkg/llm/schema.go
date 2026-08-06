@@ -32,6 +32,14 @@ type Schema struct {
 //	    Op   string `json:"op" jsonschema:"enum=add,enum=sub"`
 //	}
 func GenerateSchema(v any) *Schema {
+	// A proxy transport may already have converted the caller's Go parameter
+	// type into a schema. Preserve it instead of reflecting on Schema itself.
+	if schema, ok := v.(*Schema); ok {
+		return schema
+	}
+	if schema, ok := v.(Schema); ok {
+		return &schema
+	}
 	t := reflect.TypeOf(v)
 	if t == nil {
 		return &Schema{Type: "object"}
