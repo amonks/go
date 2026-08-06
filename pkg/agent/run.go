@@ -10,11 +10,14 @@ import (
 	"time"
 
 	"monks.co/pkg/llm"
+	"monks.co/pkg/llmproxy"
 )
 
 type streamWithRetryFunc func(ctx context.Context, model llm.Model, req llm.Request, opts llm.StreamOptions, config llm.RetryConfig) (*llm.StreamHandle, error)
 
-var streamWithRetry streamWithRetryFunc = llm.StreamWithRetry
+var streamWithRetry streamWithRetryFunc = func(ctx context.Context, _ llm.Model, req llm.Request, opts llm.StreamOptions, _ llm.RetryConfig) (*llm.StreamHandle, error) {
+	return llmproxy.Stream(ctx, "agent.loop", llmproxy.TierDeep, req, opts)
+}
 
 func isRetryableStreamError(err error) bool {
 	if err == nil {
@@ -439,4 +442,3 @@ func addUsage(a, b llm.Usage) llm.Usage {
 		},
 	}
 }
-
