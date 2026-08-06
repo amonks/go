@@ -88,6 +88,31 @@ func TestWaitWithJitter_ContextCancellation(t *testing.T) {
 	}
 }
 
+// TestJitterFor covers the jitter bound directly, so the wall-clock test below
+// doesn't have to: a scheduler-dependent upper bound on elapsed time is a flake
+// waiting to happen, but the bound on the jitter itself is exact.
+func TestJitterFor(t *testing.T) {
+	waits := []time.Duration{
+		0,
+		1 * time.Nanosecond,
+		3 * time.Nanosecond, // less than 4ns: wait/4 truncates to zero
+		1 * time.Millisecond,
+		50 * time.Millisecond,
+		30 * time.Second,
+	}
+
+	for _, wait := range waits {
+		t.Run(wait.String(), func(t *testing.T) {
+			for range 1000 {
+				got := jitterFor(wait)
+				if got < 0 || got > wait/4 {
+					t.Fatalf("jitterFor(%v) = %v, want within [0, %v]", wait, got, wait/4)
+				}
+			}
+		})
+	}
+}
+
 func TestWaitWithJitter_CompletesNormally(t *testing.T) {
 	ctx := context.Background()
 	start := time.Now()
@@ -99,15 +124,11 @@ func TestWaitWithJitter_CompletesNormally(t *testing.T) {
 		t.Errorf("waitWithJitter() returned error: %v", err)
 	}
 
-	// Should wait at least the base duration
+	// Should wait at least the base duration. A timer never fires early, so
+	// this bound is safe under any amount of load. The upper bound lives in
+	// TestJitterFor, which doesn't depend on the scheduler.
 	if elapsed < 50*time.Millisecond {
 		t.Errorf("waitWithJitter() returned too quickly: %v", elapsed)
-	}
-
-	// Should not wait more than base + 25% jitter + small margin
-	maxWait := 75 * time.Millisecond
-	if elapsed > maxWait {
-		t.Errorf("waitWithJitter() waited too long: %v (max expected %v)", elapsed, maxWait)
 	}
 }
 
@@ -209,16 +230,21 @@ func TestStreamWithRetry_NonRetryableError(t *testing.T) {
 		Provider: "test",
 	}
 
-	start := time.Now()
 	_, err := StreamWithRetry(ctx, model, Request{}, StreamOptions{}, config)
-	elapsed := time.Since(start)
 
 	if err == nil {
-		t.Error("expected error for unsupported API")
+		t.Fatal("expected error for unsupported API")
 	}
 
-	// Should return immediately without retrying
-	if elapsed > 100*time.Millisecond {
-		t.Errorf("non-retryable error should return immediately, took: %v", elapsed)
+	// An unsupported API is a permanent configuration error, so StreamWithRetry
+	// must return it on the first attempt rather than backing off and asking
+	// again. Asserting on the marker rather than on elapsed time keeps this
+	// deterministic under load.
+	re, ok := err.(*retryableError)
+	if !ok {
+		t.Fatalf("unsupported API error = %T, want *retryableError", err)
+	}
+	if re.retryable {
+		t.Error("unsupported API error marked retryable, want non-retryable")
 	}
 }
