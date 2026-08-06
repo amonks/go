@@ -55,14 +55,22 @@ func (e *retryableError) Unwrap() error {
 	return e.err
 }
 
+// jitterFor returns a random offset in [0, wait/4] to spread retries out.
+// Waits shorter than 4ns get no jitter, since there is no room for any.
+func jitterFor(wait time.Duration) time.Duration {
+	span := int64(wait / 4)
+	if span <= 0 {
+		return 0
+	}
+	return time.Duration(rand.Int63n(span + 1))
+}
+
 // waitWithJitter waits for the specified duration with some jitter.
 func waitWithJitter(ctx context.Context, wait time.Duration) error {
-	// Add up to 25% jitter
-	jitter := time.Duration(rand.Int63n(int64(wait / 4)))
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-time.After(wait + jitter):
+	case <-time.After(wait + jitterFor(wait)):
 		return nil
 	}
 }
@@ -80,6 +88,7 @@ func calculateNextWait(current time.Duration, config RetryConfig) time.Duration 
 //   - Network errors (connection refused, timeout, DNS failure): always retried
 //   - HTTP 429 (rate limit), 500, 502, 503, 504: retried
 //   - HTTP 4xx (except 429): not retried (client errors)
+//   - Unsupported model.API: not retried (permanent configuration error)
 //   - Context cancellation: stops retrying immediately
 func StreamWithRetry(ctx context.Context, model Model, req Request, opts StreamOptions, config RetryConfig) (*StreamHandle, error) {
 	var lastErr error

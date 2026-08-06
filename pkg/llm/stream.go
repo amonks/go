@@ -153,7 +153,8 @@ func Stream(ctx context.Context, model Model, req Request, opts StreamOptions) (
 	case APIOpenAIResponses:
 		handle, err = streamOpenAIResponses(ctx, model, req, opts)
 	default:
-		err = fmt.Errorf("unsupported API: %s", model.API)
+		// A permanent configuration error: retrying will pick the same branch.
+		err = &retryableError{err: fmt.Errorf("unsupported API: %s", model.API)}
 	}
 	if err != nil {
 		// Request never got off the ground (bad config, non-2xx, network).
