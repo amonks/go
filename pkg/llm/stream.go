@@ -95,7 +95,11 @@ func (h *StreamHandle) Wait() (AssistantMessage, error) {
 	select {
 	case msg := <-h.done:
 		if !h.start.IsZero() {
+			// Only handles built by Stream log and record; a wrapper
+			// handle re-delivering an inner stream's message must not
+			// count its usage twice.
 			logInvocationDone(h, msg)
+			recordUsage(msg)
 		}
 		return msg, nil
 	case err := <-h.errCh:
