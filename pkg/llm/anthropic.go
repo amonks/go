@@ -211,7 +211,20 @@ func convertToAnthropicRequest(model Model, req Request, opts StreamOptions) ant
 	// old {type: "enabled", budget_tokens: N} shape with a 400 — they take
 	// {type: "adaptive"} with an output_config effort level instead, and
 	// also reject explicit sampling parameters like temperature.
-	if opts.ThinkingLevel != "" && opts.ThinkingLevel != ThinkingOff {
+	switch {
+	case opts.ThinkingLevel == ThinkingOff:
+		// On the adaptive families thinking is on unless the request says
+		// otherwise, and its tokens come out of max_tokens — so a caller
+		// asking for no thinking has to be sent as an explicit "disabled",
+		// not as an omitted parameter. (Sending no effort leaves the
+		// default, which is the only level Opus 5 accepts alongside
+		// disabled thinking.) Before 4.6, omitting thinking already meant
+		// off, and Fable and Mythos think unconditionally and 400 on
+		// "disabled": both take the omission.
+		if modelUsesAdaptiveThinking(model.ID) && !modelAlwaysThinks(model.ID) {
+			anthropicReq.Thinking = &anthropicThinking{Type: "disabled"}
+		}
+	case opts.ThinkingLevel != "":
 		if modelUsesAdaptiveThinking(model.ID) {
 			anthropicReq.Thinking = &anthropicThinking{Type: "adaptive"}
 			anthropicReq.OutputConfig = &anthropicOutputConfig{
@@ -320,6 +333,23 @@ var adaptiveThinkingModelPrefixes = []string{
 
 func modelUsesAdaptiveThinking(modelID string) bool {
 	for _, prefix := range adaptiveThinkingModelPrefixes {
+		if strings.HasPrefix(modelID, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// alwaysThinkingModelPrefixes lists the families whose thinking cannot be
+// turned off: an explicit {type: "disabled"} is a 400, so a request that
+// wants no thinking simply omits the parameter and gets thinking anyway.
+var alwaysThinkingModelPrefixes = []string{
+	"claude-fable-5",
+	"claude-mythos-5",
+}
+
+func modelAlwaysThinks(modelID string) bool {
+	for _, prefix := range alwaysThinkingModelPrefixes {
 		if strings.HasPrefix(modelID, prefix) {
 			return true
 		}

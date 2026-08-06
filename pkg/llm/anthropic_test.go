@@ -434,10 +434,10 @@ func TestConvertToAnthropicRequest_AdaptiveThinkingModels(t *testing.T) {
 		}
 	})
 
-	t.Run("thinking off omits thinking and output_config", func(t *testing.T) {
+	t.Run("thinking off disables thinking and sends no output_config", func(t *testing.T) {
 		anthropicReq := convertToAnthropicRequest(Model{ID: "claude-sonnet-5"}, req, StreamOptions{ThinkingLevel: ThinkingOff})
-		if anthropicReq.Thinking != nil {
-			t.Fatalf("expected no thinking config, got %+v", anthropicReq.Thinking)
+		if anthropicReq.Thinking == nil || anthropicReq.Thinking.Type != "disabled" {
+			t.Fatalf("expected thinking type disabled, got %+v", anthropicReq.Thinking)
 		}
 		if anthropicReq.OutputConfig != nil {
 			t.Fatalf("expected no output_config, got %+v", anthropicReq.OutputConfig)
@@ -490,5 +490,43 @@ func TestProcessAnthropicStream_UnknownBlockTypeDoesNotShiftIndices(t *testing.T
 		}
 	case err := <-errCh:
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// Thinking is on by default on the adaptive-thinking families, and its
+// tokens come out of max_tokens, so omitting the parameter is not the
+// same as turning thinking off. ThinkingOff has to say so explicitly —
+// on the families that accept it.
+func TestConvertToAnthropicRequest_ThinkingOff(t *testing.T) {
+	for _, tc := range []struct {
+		model string
+		level ThinkingLevel
+		want  string // "" means the request carries no thinking parameter
+	}{
+		{"claude-sonnet-5", ThinkingOff, "disabled"},
+		{"claude-opus-5", ThinkingOff, "disabled"},
+		{"claude-sonnet-4-6", ThinkingOff, "disabled"},
+		// Unset is the model's own default, which the agent loop wants.
+		{"claude-sonnet-5", "", ""},
+		// Omitting thinking already means off before the 4.6 families.
+		{"claude-haiku-4-5", ThinkingOff, ""},
+		// Fable and Mythos think unconditionally and 400 on "disabled".
+		{"claude-fable-5", ThinkingOff, ""},
+		{"claude-mythos-5", ThinkingOff, ""},
+		// A level still asks for thinking.
+		{"claude-sonnet-5", ThinkingLow, "adaptive"},
+	} {
+		req := convertToAnthropicRequest(
+			Model{ID: tc.model, API: APIAnthropicMessages},
+			Request{},
+			StreamOptions{ThinkingLevel: tc.level},
+		)
+		got := ""
+		if req.Thinking != nil {
+			got = req.Thinking.Type
+		}
+		if got != tc.want {
+			t.Errorf("%s with thinking %q: type %q, want %q", tc.model, tc.level, got, tc.want)
+		}
 	}
 }
