@@ -368,33 +368,33 @@ func TestBrowserAutoThemeInheritsForcedDocumentScheme(t *testing.T) {
 	navigateReady(t, ctx, server.URL+"/")
 
 	var got struct {
-		AutoScheme         string `json:"autoScheme"`
-		AutoBackground     string `json:"autoBackground"`
-		DarkScheme         string `json:"darkScheme"`
-		DarkBackground     string `json:"darkBackground"`
-		RestoredAutoScheme string `json:"restoredAutoScheme"`
+		AutoScheme             string `json:"autoScheme"`
+		AutoControlsBackground string `json:"autoControlsBackground"`
+		DarkScheme             string `json:"darkScheme"`
+		DarkControlsBackground string `json:"darkControlsBackground"`
+		RestoredAutoScheme     string `json:"restoredAutoScheme"`
 	}
 	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
 		document.documentElement.style.colorScheme = 'light';
 		const grid = document.querySelector('#people');
-		const wrap = grid.querySelector('.datagrid-table-wrap');
+		const controls = grid.querySelector('.datagrid-panel');
 		const autoScheme = getComputedStyle(grid).colorScheme;
-		const autoBackground = getComputedStyle(wrap).backgroundColor;
+		const autoControlsBackground = getComputedStyle(controls).backgroundColor;
 		grid.dataset.dgTheme = 'dark';
 		const darkScheme = getComputedStyle(grid).colorScheme;
-		const darkBackground = getComputedStyle(wrap).backgroundColor;
+		const darkControlsBackground = getComputedStyle(controls).backgroundColor;
 		delete grid.dataset.dgTheme;
 		return {
 			autoScheme,
-			autoBackground,
+			autoControlsBackground,
 			darkScheme,
-			darkBackground,
+			darkControlsBackground,
 			restoredAutoScheme: getComputedStyle(grid).colorScheme,
 		};
 	})()`, &got)); err != nil {
 		t.Fatal(err)
 	}
-	if got.AutoScheme != "light" || got.RestoredAutoScheme != "light" || got.DarkScheme != "dark" || got.AutoBackground == got.DarkBackground {
+	if got.AutoScheme != "light" || got.RestoredAutoScheme != "light" || got.DarkScheme != "dark" || got.AutoControlsBackground == got.DarkControlsBackground {
 		t.Fatalf("document and grid color schemes did not compose: %#v", got)
 	}
 }
@@ -635,30 +635,44 @@ func TestBrowserInteractionsPreserveRowsURLAndGridIsolation(t *testing.T) {
 	}
 }
 
-func TestBrowserRowHeadersRetainBodyCellStyling(t *testing.T) {
+func TestBrowserTableUsesCompactMonospacedBackgroundlessStyling(t *testing.T) {
 	server := browserServer(t)
 	defer server.Close()
 	ctx := newBrowser(t)
 	navigateReady(t, ctx, server.URL)
 
 	var got struct {
-		Tag                 string `json:"tag"`
-		Scope               string `json:"scope"`
-		BodyPosition        string `json:"bodyPosition"`
-		BodyTextTransform   string `json:"bodyTextTransform"`
-		BodyFontWeight      string `json:"bodyFontWeight"`
-		HeadPosition        string `json:"headPosition"`
-		HeadTextTransform   string `json:"headTextTransform"`
-		RowHeaderBackground string `json:"rowHeaderBackground"`
-		DataCellBackground  string `json:"dataCellBackground"`
-		SecondCellBorder    string `json:"secondCellBorder"`
+		Tag                  string `json:"tag"`
+		Scope                string `json:"scope"`
+		BodyPosition         string `json:"bodyPosition"`
+		BodyTextTransform    string `json:"bodyTextTransform"`
+		BodyFontWeight       string `json:"bodyFontWeight"`
+		BodyFontFamily       string `json:"bodyFontFamily"`
+		BodyFontSize         string `json:"bodyFontSize"`
+		BodyPaddingBlock     string `json:"bodyPaddingBlock"`
+		BodyPaddingInline    string `json:"bodyPaddingInline"`
+		HeadPosition         string `json:"headPosition"`
+		HeadTextTransform    string `json:"headTextTransform"`
+		HeadBackground       string `json:"headBackground"`
+		SortedHeadBackground string `json:"sortedHeadBackground"`
+		CaptionBackground    string `json:"captionBackground"`
+		RowHeaderBackground  string `json:"rowHeaderBackground"`
+		DataCellBackground   string `json:"dataCellBackground"`
+		SecondCellBorder     string `json:"secondCellBorder"`
+		WrapperBackground    string `json:"wrapperBackground"`
+		WrapperBorder        string `json:"wrapperBorder"`
 	}
 	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
 		const grid = document.querySelector('#people');
+		const wrapper = grid.querySelector('.datagrid-table-wrap');
 		const row = grid.querySelectorAll('tbody tr[data-dg-row]:not([hidden])')[1];
 		const rowHeader = row.querySelector('th[data-dg-column="name"]');
 		const dataCell = row.children[1];
 		const columnHeader = grid.querySelector('thead th[data-dg-column="name"]');
+		const caption = grid.querySelector('caption');
+		grid.setState({...grid.getState(), sort:'joined', descending:true}, {updateURL:false});
+		const sortedHeader = grid.querySelector('thead th[data-dg-column="joined"]');
+		const wrapperStyle = getComputedStyle(wrapper);
 		const bodyStyle = getComputedStyle(rowHeader);
 		const dataStyle = getComputedStyle(dataCell);
 		const headStyle = getComputedStyle(columnHeader);
@@ -668,11 +682,20 @@ func TestBrowserRowHeadersRetainBodyCellStyling(t *testing.T) {
 			bodyPosition: bodyStyle.position,
 			bodyTextTransform: bodyStyle.textTransform,
 			bodyFontWeight: bodyStyle.fontWeight,
+			bodyFontFamily: bodyStyle.fontFamily,
+			bodyFontSize: bodyStyle.fontSize,
+			bodyPaddingBlock: bodyStyle.paddingBlock,
+			bodyPaddingInline: bodyStyle.paddingInline,
 			headPosition: headStyle.position,
 			headTextTransform: headStyle.textTransform,
+			headBackground: headStyle.backgroundColor,
+			sortedHeadBackground: getComputedStyle(sortedHeader).backgroundColor,
+			captionBackground: getComputedStyle(caption).backgroundColor,
 			rowHeaderBackground: bodyStyle.backgroundColor,
 			dataCellBackground: dataStyle.backgroundColor,
 			secondCellBorder: dataStyle.borderInlineStartWidth,
+			wrapperBackground: wrapperStyle.backgroundColor,
+			wrapperBorder: wrapperStyle.borderTopWidth,
 		};
 	})()`, &got)); err != nil {
 		t.Fatal(err)
@@ -683,14 +706,23 @@ func TestBrowserRowHeadersRetainBodyCellStyling(t *testing.T) {
 	if got.BodyPosition != "static" || got.BodyTextTransform != "none" || got.BodyFontWeight != "600" {
 		t.Fatalf("row header body styling: position=%q text-transform=%q font-weight=%q", got.BodyPosition, got.BodyTextTransform, got.BodyFontWeight)
 	}
-	if got.HeadPosition != "sticky" || got.HeadTextTransform != "uppercase" {
+	if !strings.Contains(got.BodyFontFamily, "monospace") || got.BodyFontSize != "12px" {
+		t.Fatalf("body type = %q at %q, want a 12px monospace stack", got.BodyFontFamily, got.BodyFontSize)
+	}
+	if got.BodyPaddingBlock != "2px" || got.BodyPaddingInline != "6px" {
+		t.Fatalf("body cell padding = block %q inline %q, want 2px 6px", got.BodyPaddingBlock, got.BodyPaddingInline)
+	}
+	if got.HeadPosition != "static" || got.HeadTextTransform != "none" {
 		t.Fatalf("column-header styling changed: position=%q text-transform=%q", got.HeadPosition, got.HeadTextTransform)
 	}
-	if got.RowHeaderBackground != got.DataCellBackground {
-		t.Fatalf("striped row backgrounds differ: row header=%q data cell=%q", got.RowHeaderBackground, got.DataCellBackground)
+	if got.HeadBackground != "rgba(0, 0, 0, 0)" || got.SortedHeadBackground != got.HeadBackground || got.CaptionBackground != got.HeadBackground || got.RowHeaderBackground != got.HeadBackground || got.DataCellBackground != got.HeadBackground {
+		t.Fatalf("table is not backgroundless: caption=%q head=%q sorted head=%q row header=%q data=%q", got.CaptionBackground, got.HeadBackground, got.SortedHeadBackground, got.RowHeaderBackground, got.DataCellBackground)
 	}
-	if got.SecondCellBorder != "1px" {
-		t.Fatalf("data cell following a row header has inline border %q, want 1px", got.SecondCellBorder)
+	if got.SecondCellBorder != "0px" {
+		t.Fatalf("data cell following a row header has inline border %q, want none", got.SecondCellBorder)
+	}
+	if got.WrapperBackground != "rgba(0, 0, 0, 0)" || got.WrapperBorder != "0px" {
+		t.Fatalf("table wrapper background=%q border=%q, want transparent and borderless", got.WrapperBackground, got.WrapperBorder)
 	}
 }
 
