@@ -1,10 +1,13 @@
 package datagrid
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -26,22 +29,25 @@ import (
 )
 
 // browserLaunchTimeout is how long a headless Chrome gets to print its
-// "DevTools listening on ws://..." line, and browserBudget the
-// wall-clock allowance for one test's whole chromedp session.
+// "DevTools listening on ws://..." line, browserDialTimeout how long
+// its DevTools socket then gets to accept chromedp's connection, and
+// browserBudget the wall-clock allowance for one test's whole chromedp
+// session, launch included.
 //
-// Both are deliberately loose, for the same reason pkg/hermit's
-// internal/browsertest is: in the Alpine CI builder a Chromium launch
-// costs ~15s even on an idle machine, and the first launch in a fresh
-// container — cold page cache, the disk busy with concurrent package
-// builds — has taken over 30s where a dev laptop spends under one. A
-// 30s launch timeout failed main on exactly that and bought nothing;
-// the tests take the same ~1.5s each locally either way. The session
-// budget must clear the launch by a wide margin: the browser starts
-// inside the first chromedp.Run under this budget, so a launch that
-// survives its own timeout still needs room to run the test.
+// All three are ceilings, not costs, and deliberately loose. The first
+// Chromium launch on a fresh CI builder cold-reads ~300MB from a slow
+// image device (specs/ci.md § Chromium in the builder) — CI has seen
+// the DevTools line arrive at 56s and the dial miss chromedp's 10s
+// default after it — which is why newBrowser pre-reads Chromium's
+// install directory into the page cache first, under no deadline. The
+// timeouts backstop what the pre-read doesn't cover: the system
+// libraries Chromium also loads, and a busier builder than the one
+// measured. The budget must clear launch plus dial with room for the
+// test itself, which takes ~1.5s.
 const (
-	browserLaunchTimeout = 60 * time.Second
-	browserBudget        = 3 * time.Minute
+	browserLaunchTimeout = 2 * time.Minute
+	browserDialTimeout   = time.Minute
+	browserBudget        = 5 * time.Minute
 )
 
 type browserPerson struct {
@@ -205,23 +211,35 @@ func chromePath(t *testing.T) string {
 	return ""
 }
 
+// warmChromeOnce guards the one pre-read of Chromium's install
+// directory per test binary (see browserLaunchTimeout).
+var warmChromeOnce sync.Once
+
 func newBrowser(t *testing.T) context.Context {
 	t.Helper()
+	chrome := chromePath(t)
+	warmChromeOnce.Do(func() {
+		dir, ok := chromeInstallDir(chrome)
+		if !ok {
+			t.Logf("no resources.pak beside %s; skipping the page-cache pre-read", chrome)
+			return
+		}
+		start := time.Now()
+		read := warmPageCache(dir)
+		t.Logf("pre-read %.1fMB under %s into the page cache in %s", float64(read)/(1<<20), dir, time.Since(start).Round(time.Millisecond))
+	})
 	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(),
 		append(chromedp.DefaultExecAllocatorOptions[:],
-			chromedp.ExecPath(chromePath(t)),
+			chromedp.ExecPath(chrome),
 			chromedp.UserDataDir(t.TempDir()),
 			chromedp.Flag("headless", "new"),
 			chromedp.Flag("disable-gpu", true),
 			chromedp.Flag("no-sandbox", true),
-			// A container's /dev/shm is tiny; without this Chrome
-			// prints its devtools URL and then dies, and the dial
-			// times out (what CI's builder showed).
-			chromedp.Flag("disable-dev-shm-usage", true),
 			chromedp.WSURLReadTimeout(browserLaunchTimeout),
 		)...)
 	t.Cleanup(cancelAlloc)
-	ctx, cancelBrowser := chromedp.NewContext(allocCtx)
+	ctx, cancelBrowser := chromedp.NewContext(allocCtx,
+		chromedp.WithBrowserOption(chromedp.WithDialTimeout(browserDialTimeout)))
 	t.Cleanup(cancelBrowser)
 	ctx, cancelTimeout := context.WithTimeout(ctx, browserBudget)
 	t.Cleanup(cancelTimeout)
@@ -232,6 +250,43 @@ func newBrowser(t *testing.T) context.Context {
 	})
 	captureBrowserConsole(t, ctx)
 	return ctx
+}
+
+// chromeInstallDir returns the directory the resolved Chrome binary
+// lives in, if it looks like a Chrome install directory: resources.pak
+// sits beside every Linux Chrome and Chromium binary. The check keeps
+// the pre-read off a shared bin directory that a wrapper script might
+// resolve into (and off macOS's near-empty Contents/MacOS), where it
+// would read a lot and warm nothing.
+func chromeInstallDir(chrome string) (string, bool) {
+	dir := filepath.Dir(chrome)
+	if _, err := os.Stat(filepath.Join(dir, "resources.pak")); err != nil {
+		return "", false
+	}
+	return dir, true
+}
+
+// warmPageCache reads every regular file under dir so the kernel's page
+// cache holds it, and returns the bytes read. Symlinks are skipped —
+// Alpine's install directory aliases its 282MB binary as chrome, and
+// the file behind a symlink is read as itself if it lives here — as
+// are unreadable entries and a missing dir: a warm-up is best-effort
+// by design, never a reason to fail a test.
+func warmPageCache(dir string) (read int64) {
+	_ = filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || !entry.Type().IsRegular() {
+			return nil
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			return nil
+		}
+		defer file.Close()
+		n, _ := io.Copy(io.Discard, file)
+		read += n
+		return nil
+	})
+	return read
 }
 
 func captureBrowserConsole(t *testing.T, ctx context.Context) {
@@ -989,6 +1044,57 @@ func boolInt(value bool) int {
 		return 1
 	}
 	return 0
+}
+
+func TestChromeInstallDirWantsResourcesBesideTheBinary(t *testing.T) {
+	dir := t.TempDir()
+	chrome := filepath.Join(dir, "chromium")
+	if err := os.WriteFile(chrome, nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := chromeInstallDir(chrome); ok {
+		t.Fatalf("chromeInstallDir without resources.pak = %q, true; want false", got)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "resources.pak"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := chromeInstallDir(chrome); !ok || got != dir {
+		t.Fatalf("chromeInstallDir with resources.pak = %q, %v; want %q, true", got, ok, dir)
+	}
+}
+
+func TestWarmPageCacheReadsEveryRegularFileUnderDir(t *testing.T) {
+	dir := t.TempDir()
+	write := func(rel string, size int) {
+		t.Helper()
+		path := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, bytes.Repeat([]byte("x"), size), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("chrome", 1000)
+	write("locales/en-US.pak", 300)
+	write("swiftshader/libEGL.so", 7)
+	if err := os.Mkdir(filepath.Join(dir, "empty"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Symlinks — an alias of the binary, a dangling one — are skipped,
+	// as is anything that isn't a regular file. None of them fail it.
+	if err := os.Symlink("chrome", filepath.Join(dir, "chrome-link")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("missing", filepath.Join(dir, "dangling")); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := warmPageCache(dir), int64(1000+300+7); got != want {
+		t.Fatalf("warmPageCache(%s) read %d bytes, want %d", dir, got, want)
+	}
+	if got := warmPageCache(filepath.Join(dir, "missing")); got != 0 {
+		t.Fatalf("warmPageCache(missing dir) read %d bytes, want 0", got)
+	}
 }
 
 func TestPreviewServe(t *testing.T) {
