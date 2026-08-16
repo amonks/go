@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/a-h/templ"
+	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 	"pgregory.net/rapid"
@@ -95,6 +96,7 @@ func browserRows() []browserPerson {
 func browserOptions(id string) Options[browserPerson] {
 	name := TextColumn("name", "Name", func(person browserPerson) string { return person.Name })
 	name.Cell = func(person browserPerson) templ.Component { return strongCell(person.Name) }
+	name.RowHeader = true
 	return Options[browserPerson]{
 		ID:        id,
 		Caption:   "Computing pioneers",
@@ -139,6 +141,31 @@ func browserOptions(id string) Options[browserPerson] {
 		},
 		RowID: func(person browserPerson) string { return person.ID },
 	}
+}
+
+func noScriptBrowserDocument(t *testing.T) string {
+	t.Helper()
+	options := Options[string]{
+		ID:      "empty-grid",
+		Caption: "Empty grid",
+		Columns: []Column[string]{TextColumn("value", "Value", func(value string) string { return value })},
+	}
+	var out strings.Builder
+	out.WriteString(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>No-script datagrid</title>`)
+	if err := Head().Render(context.Background(), &out); err != nil {
+		t.Fatal(err)
+	}
+	out.WriteString(`</head><body>`)
+	if err := Table(options, nil).Render(context.Background(), &out); err != nil {
+		t.Fatal(err)
+	}
+	options.ID = "populated-grid"
+	options.Caption = "Populated grid"
+	if err := Table(options, []string{"one row"}).Render(context.Background(), &out); err != nil {
+		t.Fatal(err)
+	}
+	out.WriteString(`</body></html>`)
+	return out.String()
 }
 
 func browserDocument(t *testing.T) string {
@@ -535,6 +562,212 @@ func TestBrowserInteractionsPreserveRowsURLAndGridIsolation(t *testing.T) {
 	}
 	if emptied.Filters != 0 || emptied.Summary != "No rows" || !emptied.Empty {
 		t.Fatalf("empty refreshed grid = %#v", emptied)
+	}
+}
+
+func TestBrowserRowHeadersRetainBodyCellStyling(t *testing.T) {
+	server := browserServer(t)
+	defer server.Close()
+	ctx := newBrowser(t)
+	navigateReady(t, ctx, server.URL)
+
+	var got struct {
+		Tag                 string `json:"tag"`
+		Scope               string `json:"scope"`
+		BodyPosition        string `json:"bodyPosition"`
+		BodyTextTransform   string `json:"bodyTextTransform"`
+		BodyFontWeight      string `json:"bodyFontWeight"`
+		HeadPosition        string `json:"headPosition"`
+		HeadTextTransform   string `json:"headTextTransform"`
+		RowHeaderBackground string `json:"rowHeaderBackground"`
+		DataCellBackground  string `json:"dataCellBackground"`
+		SecondCellBorder    string `json:"secondCellBorder"`
+	}
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
+		const grid = document.querySelector('#people');
+		const row = grid.querySelectorAll('tbody tr[data-dg-row]:not([hidden])')[1];
+		const rowHeader = row.querySelector('th[data-dg-column="name"]');
+		const dataCell = row.children[1];
+		const columnHeader = grid.querySelector('thead th[data-dg-column="name"]');
+		const bodyStyle = getComputedStyle(rowHeader);
+		const dataStyle = getComputedStyle(dataCell);
+		const headStyle = getComputedStyle(columnHeader);
+		return {
+			tag: rowHeader.tagName,
+			scope: rowHeader.scope,
+			bodyPosition: bodyStyle.position,
+			bodyTextTransform: bodyStyle.textTransform,
+			bodyFontWeight: bodyStyle.fontWeight,
+			headPosition: headStyle.position,
+			headTextTransform: headStyle.textTransform,
+			rowHeaderBackground: bodyStyle.backgroundColor,
+			dataCellBackground: dataStyle.backgroundColor,
+			secondCellBorder: dataStyle.borderInlineStartWidth,
+		};
+	})()`, &got)); err != nil {
+		t.Fatal(err)
+	}
+	if got.Tag != "TH" || got.Scope != "row" {
+		t.Fatalf("row header semantics = <%s scope=%q>, want <TH scope=row>", got.Tag, got.Scope)
+	}
+	if got.BodyPosition != "static" || got.BodyTextTransform != "none" || got.BodyFontWeight != "600" {
+		t.Fatalf("row header body styling: position=%q text-transform=%q font-weight=%q", got.BodyPosition, got.BodyTextTransform, got.BodyFontWeight)
+	}
+	if got.HeadPosition != "sticky" || got.HeadTextTransform != "uppercase" {
+		t.Fatalf("column-header styling changed: position=%q text-transform=%q", got.HeadPosition, got.HeadTextTransform)
+	}
+	if got.RowHeaderBackground != got.DataCellBackground {
+		t.Fatalf("striped row backgrounds differ: row header=%q data cell=%q", got.RowHeaderBackground, got.DataCellBackground)
+	}
+	if got.SecondCellBorder != "1px" {
+		t.Fatalf("data cell following a row header has inline border %q, want 1px", got.SecondCellBorder)
+	}
+}
+
+func TestBrowserCallerOwnedBodyRowHeaderCannotInventColumn(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = io.WriteString(w, callerOwnedBodyRowHeaderDocument(t))
+	}))
+	defer server.Close()
+	ctx := newBrowser(t)
+
+	var got struct {
+		Columns       []string            `json:"columns"`
+		FacetColumns  []string            `json:"facetColumns"`
+		Sort          string              `json:"sort"`
+		Filters       map[string][]string `json:"filters"`
+		RowIDs        []string            `json:"rowIDs"`
+		BodyAriaSort  string              `json:"bodyAriaSort"`
+		BodySortCount int                 `json:"bodySortCount"`
+	}
+	if err := chromedp.Run(ctx,
+		chromedp.EmulateViewport(900, 700),
+		chromedp.Navigate(server.URL),
+		chromedp.Poll(`document.querySelector('#caller-owned-row-header')?.hasAttribute('data-dg-ready')`, nil,
+			chromedp.WithPollingTimeout(5*time.Second)),
+		chromedp.Evaluate(`(() => {
+			const grid = document.querySelector('#caller-owned-row-header');
+			grid.setState({sort:'body-only', filters:{'body-only':['Alpha']}}, {updateURL:false});
+			grid.querySelector('tbody [data-dg-role="sort"]').click();
+			const state = grid.getState();
+			const rowHeader = grid.querySelector('tbody th[data-dg-column="body-only"]');
+			return {
+				columns: [...grid._columns.keys()],
+				facetColumns: [...grid.querySelectorAll('details[data-dg-filter-column]')]
+					.map((details) => details.dataset.dgFilterColumn),
+				sort: state.sort,
+				filters: state.filters,
+				rowIDs: [...grid.querySelectorAll('tbody tr[data-dg-row]')]
+					.map((row) => row.dataset.dgRowId),
+				bodyAriaSort: rowHeader.getAttribute('aria-sort') || '',
+				bodySortCount: grid.querySelectorAll('tbody [data-dg-role="sort"]').length,
+			};
+		})()`, &got),
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if !slices.Equal(got.Columns, []string{"value"}) {
+		t.Fatalf("discovered columns = %v, want only the thead column", got.Columns)
+	}
+	if !slices.Equal(got.FacetColumns, []string{"value"}) {
+		t.Fatalf("facet columns = %v, want only the thead column", got.FacetColumns)
+	}
+	if got.Sort != "" || len(got.Filters) != 0 {
+		t.Fatalf("body-only header became a state target: sort=%q filters=%v", got.Sort, got.Filters)
+	}
+	if !slices.Equal(got.RowIDs, []string{"zulu", "alpha"}) {
+		t.Fatalf("body-only sort control reordered rows: %v", got.RowIDs)
+	}
+	if got.BodyAriaSort != "" || got.BodySortCount != 2 {
+		t.Fatalf("caller row headers changed: aria-sort=%q controls=%d", got.BodyAriaSort, got.BodySortCount)
+	}
+}
+
+func callerOwnedBodyRowHeaderDocument(t *testing.T) string {
+	t.Helper()
+	columnHeader := renderComponent(t, HeaderCell(HeaderCellProps{Column: "value", Label: "Value"}))
+	row := func(id, rowHeader, value string) string {
+		bodyHeader := renderComponent(t, Cell(CellProps{
+			Column:    "body-only",
+			Value:     rowHeader,
+			RowHeader: true,
+			Content:   templ.Raw(`<button type="button" data-dg-role="sort" data-dg-column="body-only">` + rowHeader + `</button>`),
+		}))
+		valueCell := renderComponent(t, Cell(CellProps{Column: "value", Value: value}))
+		return `<tr data-dg-row data-dg-row-id="` + id + `">` + bodyHeader + valueCell + `</tr>`
+	}
+	table := templ.Raw(`<table id="caller-owned-row-header-table" class="datagrid-table">
+		<thead><tr><th scope="col">Row label</th>` + columnHeader + `</tr></thead>
+		<tbody>` + row("zulu", "Zulu", "second") + row("alpha", "Alpha", "first") + `</tbody>
+	</table>`)
+
+	var out strings.Builder
+	out.WriteString(`<!doctype html><html><head><meta charset="utf-8">`)
+	if err := Head().Render(context.Background(), &out); err != nil {
+		t.Fatal(err)
+	}
+	out.WriteString(`</head><body>`)
+	ctx := templ.WithChildren(context.Background(), table)
+	if err := Shell(ShellProps{
+		ID:          "caller-owned-row-header",
+		Label:       "Caller-owned row headers",
+		InitialRows: 2,
+	}).Render(ctx, &out); err != nil {
+		t.Fatal(err)
+	}
+	out.WriteString(`</body></html>`)
+	return out.String()
+}
+
+func TestBrowserNoScriptEmptyStateMatchesInitialRows(t *testing.T) {
+	html := noScriptBrowserDocument(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = io.WriteString(w, html)
+	}))
+	defer server.Close()
+	ctx := newBrowser(t)
+
+	var got struct {
+		ReadyCount       int    `json:"readyCount"`
+		EmptyHidden      bool   `json:"emptyHidden"`
+		EmptyDisplay     string `json:"emptyDisplay"`
+		PopulatedHidden  bool   `json:"populatedHidden"`
+		PopulatedDisplay string `json:"populatedDisplay"`
+		PopulatedRows    int    `json:"populatedRows"`
+	}
+	if err := chromedp.Run(ctx,
+		emulation.SetScriptExecutionDisabled(true),
+		chromedp.Navigate(server.URL),
+		chromedp.WaitReady("body", chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const empty = document.querySelector('#empty-grid [data-dg-role="empty"]');
+			const populated = document.querySelector('#populated-grid [data-dg-role="empty"]');
+			return {
+				readyCount: document.querySelectorAll('monks-datagrid[data-dg-ready]').length,
+				emptyHidden: empty.hidden,
+				emptyDisplay: getComputedStyle(empty).display,
+				populatedHidden: populated.hidden,
+				populatedDisplay: getComputedStyle(populated).display,
+				populatedRows: document.querySelectorAll('#populated-grid tbody tr').length,
+			};
+		})()`, &got),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if got.ReadyCount != 0 {
+		t.Fatalf("script-disabled document upgraded %d grids", got.ReadyCount)
+	}
+	if got.EmptyHidden || got.EmptyDisplay == "none" {
+		t.Fatalf("zero-row no-script empty state = hidden %v, display %q", got.EmptyHidden, got.EmptyDisplay)
+	}
+	if !got.PopulatedHidden || got.PopulatedDisplay != "none" {
+		t.Fatalf("populated no-script empty state = hidden %v, display %q", got.PopulatedHidden, got.PopulatedDisplay)
+	}
+	if got.PopulatedRows != 1 {
+		t.Fatalf("populated no-script table rows = %d, want 1", got.PopulatedRows)
 	}
 }
 
