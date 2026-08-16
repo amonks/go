@@ -54,7 +54,7 @@ templ Shell(props ShellProps) {
 				<div class="datagrid-table-wrap">
 					{ children... }
 				</div>
-				@EmptyState(ControlProps{GridID: props.ID, EmptyText: props.EmptyText, Empty: props.Empty})
+				@EmptyState(ControlProps{GridID: props.ID, InitialRows: props.InitialRows, EmptyText: props.EmptyText, Empty: props.Empty})
 				if props.Disabled&FeaturePagination == 0 {
 					@PaginationControl(ControlProps{GridID: props.ID})
 				}
@@ -148,7 +148,7 @@ templ PaginationControl(props ControlProps) {
 
 // EmptyState is shown when the active search and filters match no rows.
 templ EmptyState(props ControlProps) {
-	<div class="datagrid-empty" data-dg-role="empty" hidden>
+	<div class="datagrid-empty" data-dg-role="empty" hidden?={ props.InitialRows > 0 }>
 		<svg aria-hidden="true" viewBox="0 0 32 32" width="32" height="32"><rect x="5" y="7" width="22" height="18" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"></rect><path d="M10 12h12M10 16h8M10 20h5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path></svg>
 		if props.Empty != nil {
 			@props.Empty
@@ -213,29 +213,60 @@ templ Row(props RowProps) {
 // Cell annotates a table cell with independent search, sort, and filter
 // projections while preserving arbitrary templ content.
 templ Cell(props CellProps) {
-	<td
-		data-dg-column={ props.Column }
-		data-dg-value={ props.Value }
-		if props.HasSearchValue || props.SearchValue != "" {
-			data-dg-search-value={ props.SearchValue }
-		}
-		if props.HasSortValue || props.SortValue != "" {
-			data-dg-sort-value={ props.SortValue }
-		}
-		if props.HasFilterValues || props.FilterValues != nil {
-			data-dg-filter-values={ filterValuesJSON(props.FilterValues) }
-		}
-		class={ props.Class }
-		if props.Align != "" {
-			data-dg-align={ props.Align }
-		}
-	>
-		if props.Content != nil {
-			@props.Content
-		} else {
-			{ props.Value }
-		}
-	</td>
+	if props.RowHeader {
+		<th
+			scope="row"
+			data-dg-column={ props.Column }
+			data-dg-value={ props.Value }
+			if props.HasSearchValue || props.SearchValue != "" {
+				data-dg-search-value={ props.SearchValue }
+			}
+			if props.HasSortValue || props.SortValue != "" {
+				data-dg-sort-value={ props.SortValue }
+			}
+			if props.HasFilterValues || props.FilterValues != nil {
+				data-dg-filter-values={ filterValuesJSON(props.FilterValues) }
+			}
+			if props.Class != "" {
+				class={ props.Class }
+			}
+			if props.Align != "" {
+				data-dg-align={ props.Align }
+			}
+		>
+			@cellContent(props)
+		</th>
+	} else {
+		<td
+			data-dg-column={ props.Column }
+			data-dg-value={ props.Value }
+			if props.HasSearchValue || props.SearchValue != "" {
+				data-dg-search-value={ props.SearchValue }
+			}
+			if props.HasSortValue || props.SortValue != "" {
+				data-dg-sort-value={ props.SortValue }
+			}
+			if props.HasFilterValues || props.FilterValues != nil {
+				data-dg-filter-values={ filterValuesJSON(props.FilterValues) }
+			}
+			if props.Class != "" {
+				class={ props.Class }
+			}
+			if props.Align != "" {
+				data-dg-align={ props.Align }
+			}
+		>
+			@cellContent(props)
+		</td>
+	}
+}
+
+templ cellContent(props CellProps) {
+	if props.Content != nil {
+		@props.Content
+	} else {
+		{ props.Value }
+	}
 }
 
 templ renderTable(view tableView) {

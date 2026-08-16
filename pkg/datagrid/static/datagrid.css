@@ -74,8 +74,7 @@ monks-datagrid:not([data-dg-ready]) .datagrid-layout {
 
 monks-datagrid:not([data-dg-ready]) .datagrid-panel:not(:has(.datagrid-control-override:not(:empty), .datagrid-extra:not(:empty))),
 monks-datagrid:not([data-dg-ready]) .datagrid-statusbar,
-monks-datagrid:not([data-dg-ready]) .datagrid-pagination,
-monks-datagrid:not([data-dg-ready]) .datagrid-empty {
+monks-datagrid:not([data-dg-ready]) .datagrid-pagination {
   display: none;
 }
 
@@ -442,7 +441,7 @@ monks-datagrid .datagrid-table td {
   white-space: nowrap;
 }
 
-monks-datagrid .datagrid-table th {
+monks-datagrid .datagrid-table thead th {
   position: sticky;
   z-index: 2;
   inset-block-start: 0;
@@ -454,20 +453,25 @@ monks-datagrid .datagrid-table th {
   text-transform: uppercase;
 }
 
-monks-datagrid .datagrid-table th + th,
-monks-datagrid .datagrid-table td + td {
+monks-datagrid .datagrid-table tbody th[scope="row"] {
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+monks-datagrid .datagrid-table :is(th, td) + :is(th, td) {
   border-inline-start: 1px solid color-mix(in srgb, var(--datagrid-border) 62%, transparent);
 }
 
-monks-datagrid .datagrid-table tbody > tr:nth-child(even of :not([hidden])) td {
+monks-datagrid .datagrid-table tbody > tr:nth-child(even of :not([hidden])) > :is(th, td) {
   background: var(--datagrid-stripe);
 }
 
-monks-datagrid .datagrid-table tbody tr:hover td {
+monks-datagrid .datagrid-table tbody tr:hover > :is(th, td) {
   background: var(--datagrid-hover);
 }
 
-monks-datagrid .datagrid-table tbody tr:last-child td {
+monks-datagrid .datagrid-table tbody tr:last-child > :is(th, td) {
   border-block-end: 0;
 }
 

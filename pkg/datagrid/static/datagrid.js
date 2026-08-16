@@ -356,7 +356,7 @@
 
       this._columns = new Map();
       const headers = this._table
-        ? [...this._table.querySelectorAll("th[data-dg-column]")]
+        ? [...this._table.querySelectorAll("thead th[data-dg-column]")]
           .filter((node) => this._owns(node))
         : [];
       for (const header of headers) {

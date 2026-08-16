@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/a-h/templ"
+	"pgregory.net/rapid"
 )
 
 type testPerson struct {
@@ -19,8 +20,14 @@ type testPerson struct {
 	Score  string
 }
 
-func renderComponent(t *testing.T, component templ.Component) string {
-	t.Helper()
+type testFatalfer interface {
+	Fatalf(string, ...any)
+}
+
+func renderComponent(t testFatalfer, component templ.Component) string {
+	if helper, ok := t.(interface{ Helper() }); ok {
+		helper.Helper()
+	}
 	var out strings.Builder
 	if err := component.Render(context.Background(), &out); err != nil {
 		t.Fatalf("render: %v", err)
@@ -187,6 +194,158 @@ func TestLowLevelCellDefaultsBehaviorToItsValue(t *testing.T) {
 		if !strings.Contains(explicitEmpty, want) {
 			t.Errorf("explicit empty projection missing %q in %s", want, explicitEmpty)
 		}
+	}
+}
+
+func TestRowHeaderRenderingProperties(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		rowCount := rapid.IntRange(0, 30).Draw(t, "row count")
+		firstIsRowHeader := rapid.Bool().Draw(t, "first row header")
+		secondIsRowHeader := rapid.Bool().Draw(t, "second row header")
+		rows := make([]int, rowCount)
+		columns := []Column[int]{
+			{
+				Key:       "first",
+				Label:     "First",
+				Text:      func(int) string { return "first value" },
+				RowHeader: firstIsRowHeader,
+			},
+			{
+				Key:       "second",
+				Label:     "Second",
+				Text:      func(int) string { return "second value" },
+				RowHeader: secondIsRowHeader,
+			},
+		}
+
+		got := renderComponent(t, Table(Options[int]{ID: "row-headers", Columns: columns}, rows))
+		rowHeaderColumns := 0
+		if firstIsRowHeader {
+			rowHeaderColumns++
+		}
+		if secondIsRowHeader {
+			rowHeaderColumns++
+		}
+		if count, want := strings.Count(got, `scope="row"`), rowCount*rowHeaderColumns; count != want {
+			t.Fatalf("row header count = %d, want %d\n%s", count, want, got)
+		}
+		if count, want := strings.Count(got, `data-dg-value=`), rowCount*len(columns); count != want {
+			t.Fatalf("behavioral cell count = %d, want %d\n%s", count, want, got)
+		}
+
+		cellProps := CellProps{
+			Column:          "person",
+			Value:           `Ada & "Lovelace" <math>`,
+			SearchValue:     `Augusta "Ada" & co.`,
+			HasSearchValue:  true,
+			SortValue:       `<Lovelace> & Byron`,
+			HasSortValue:    true,
+			FilterValues:    []FilterValue{{Value: "math", Label: "Mathematics"}},
+			HasFilterValues: true,
+			Class:           "person-cell",
+			Align:           "end",
+		}
+		ordinaryCell := renderComponent(t, Cell(cellProps))
+		cellProps.RowHeader = true
+		rowHeaderCell := renderComponent(t, Cell(cellProps))
+		if got, want := cellOpeningAttributes(t, rowHeaderCell, `<th scope="row" `), cellOpeningAttributes(t, ordinaryCell, `<td `); got != want {
+			t.Fatalf("row-header attributes differ from ordinary cell:\nrow header: %s\nordinary:   %s", got, want)
+		}
+
+		lowLevelRowHeader := rapid.Bool().Draw(t, "low-level row header")
+		cell := ordinaryCell
+		if lowLevelRowHeader {
+			cell = rowHeaderCell
+		}
+		if gotRowHeader := strings.HasPrefix(cell, `<th scope="row"`); gotRowHeader != lowLevelRowHeader {
+			t.Fatalf("low-level Cell row-header element = %v, want %v: %s", gotRowHeader, lowLevelRowHeader, cell)
+		}
+		for _, want := range []string{
+			`data-dg-column="person"`,
+			`data-dg-value="Ada &amp; &#34;Lovelace&#34; &lt;math&gt;"`,
+			`data-dg-search-value="Augusta &#34;Ada&#34; &amp; co."`,
+			`data-dg-sort-value="&lt;Lovelace&gt; &amp; Byron"`,
+			`data-dg-filter-values="[{&#34;value&#34;:&#34;math&#34;,&#34;label&#34;:&#34;Mathematics&#34;}]"`,
+			`class="person-cell"`,
+			`data-dg-align="end"`,
+		} {
+			if !strings.Contains(cell, want) {
+				t.Fatalf("low-level Cell missing %q: %s", want, cell)
+			}
+		}
+		if !lowLevelRowHeader && !strings.HasPrefix(cell, `<td `) {
+			t.Fatalf("ordinary low-level Cell should remain a td: %s", cell)
+		}
+	})
+}
+
+func TestBrowserColumnDiscoverySelectorIsTheadScoped(t *testing.T) {
+	const scoped = `this._table.querySelectorAll("thead th[data-dg-column]")`
+	if count := strings.Count(javascript, scoped); count != 1 {
+		t.Fatalf("thead-scoped column discovery selector count = %d, want 1", count)
+	}
+	if strings.Contains(javascript, `this._table.querySelectorAll("th[data-dg-column]")`) {
+		t.Fatal("column discovery still admits annotated tbody row headers")
+	}
+}
+
+func cellOpeningAttributes(t testFatalfer, rendered, prefix string) string {
+	if !strings.HasPrefix(rendered, prefix) {
+		t.Fatalf("rendered cell %q does not start with %q", rendered, prefix)
+	}
+	end := strings.IndexByte(rendered, '>')
+	if end < 0 {
+		t.Fatalf("rendered cell has no closing angle bracket: %s", rendered)
+	}
+	return rendered[len(prefix):end]
+}
+
+func TestInitialEmptyStateVisibilityProperties(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		rowCount := rapid.IntRange(0, 100).Draw(t, "row count")
+		customEmpty := templ.Raw(`<p data-empty-marker>Nothing here yet.</p>`)
+		rows := make([]string, rowCount)
+		for i := range rows {
+			rows[i] = "row"
+		}
+
+		table := renderComponent(t, Table(Options[string]{
+			ID:      "initial-table",
+			Columns: []Column[string]{TextColumn("value", "Value", func(value string) string { return value })},
+			Empty:   customEmpty,
+		}, rows))
+		assertInitialEmptyVisibility(t, table, rowCount)
+		if !strings.Contains(table, `data-empty-marker`) {
+			t.Fatalf("full Table lost its custom empty-state content: %s", table)
+		}
+
+		ctx := templ.WithChildren(context.Background(), templ.Raw(`<table id="initial-shell-table"><tbody></tbody></table>`))
+		var shell strings.Builder
+		if err := Shell(ShellProps{ID: "initial-shell", InitialRows: rowCount, Empty: customEmpty}).Render(ctx, &shell); err != nil {
+			t.Fatalf("render low-level shell: %v", err)
+		}
+		assertInitialEmptyVisibility(t, shell.String(), rowCount)
+		if !strings.Contains(shell.String(), `data-empty-marker`) {
+			t.Fatalf("low-level Shell lost its custom empty-state content: %s", shell.String())
+		}
+	})
+}
+
+func assertInitialEmptyVisibility(t testFatalfer, rendered string, initialRows int) {
+	if helper, ok := t.(interface{ Helper() }); ok {
+		helper.Helper()
+	}
+	start := strings.Index(rendered, `<div class="datagrid-empty"`)
+	if start < 0 {
+		t.Fatalf("rendered grid has no empty state: %s", rendered)
+	}
+	end := strings.IndexByte(rendered[start:], '>')
+	if end < 0 {
+		t.Fatalf("rendered grid has an unterminated empty-state tag: %s", rendered[start:])
+	}
+	openingTag := rendered[start : start+end+1]
+	if hidden, wantHidden := strings.Contains(openingTag, " hidden"), initialRows > 0; hidden != wantHidden {
+		t.Fatalf("initialRows=%d rendered empty-state tag %q; hidden=%v, want %v", initialRows, openingTag, hidden, wantHidden)
 	}
 }
 

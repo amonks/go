@@ -85,6 +85,8 @@ type Column[T any] struct {
 	// component. Behavioral projections still come from Text and the explicit
 	// overrides below, never by scraping custom markup.
 	Cell func(T) templ.Component
+	// RowHeader renders this column's body cells as semantic row headers.
+	RowHeader bool
 
 	// Header replaces the visible header label while preserving the library's
 	// sortable button and accessibility semantics. It must not itself contain
@@ -160,10 +162,13 @@ type ShellProps struct {
 	QueryPrefix       string
 	ClientHooks       string
 	Theme             Theme
-	InitialRows       int
-	ControlPanel      templ.Component
-	Extra             templ.Component
-	Empty             templ.Component
+	// InitialRows is the number of rows present in the caller-owned table at
+	// render time. It drives the progressive, pre-upgrade summary and empty
+	// state; callers that later replace or append rows call element.refresh().
+	InitialRows  int
+	ControlPanel templ.Component
+	Extra        templ.Component
+	Empty        templ.Component
 }
 
 // HeaderCellProps configures an annotated table header for low-level grids.
@@ -191,6 +196,9 @@ type RowProps struct {
 type CellProps struct {
 	Column string
 	Value  string
+	// RowHeader renders a <th scope="row"> instead of a <td>. All behavioral
+	// projections and arbitrary content remain unchanged.
+	RowHeader bool
 
 	// Projections fall back to Value when omitted. The Has fields distinguish
 	// an intentional empty override from the zero value.
@@ -354,6 +362,7 @@ func makeTableView[T any](opts Options[T], rows []T, extra templ.Component) (tab
 			cell := CellProps{
 				Column:          column.Key,
 				Value:           text,
+				RowHeader:       column.RowHeader,
 				SearchValue:     searchValue,
 				HasSearchValue:  column.SearchText != nil,
 				SortValue:       sortValue,
