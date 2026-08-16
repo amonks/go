@@ -25,6 +25,25 @@ import (
 	"pgregory.net/rapid"
 )
 
+// browserLaunchTimeout is how long a headless Chrome gets to print its
+// "DevTools listening on ws://..." line, and browserBudget the
+// wall-clock allowance for one test's whole chromedp session.
+//
+// Both are deliberately loose, for the same reason pkg/hermit's
+// internal/browsertest is: in the Alpine CI builder a Chromium launch
+// costs ~15s even on an idle machine, and the first launch in a fresh
+// container — cold page cache, the disk busy with concurrent package
+// builds — has taken over 30s where a dev laptop spends under one. A
+// 30s launch timeout failed main on exactly that and bought nothing;
+// the tests take the same ~1.5s each locally either way. The session
+// budget must clear the launch by a wide margin: the browser starts
+// inside the first chromedp.Run under this budget, so a launch that
+// survives its own timeout still needs room to run the test.
+const (
+	browserLaunchTimeout = 60 * time.Second
+	browserBudget        = 3 * time.Minute
+)
+
 type browserPerson struct {
 	ID     string
 	Name   string
@@ -195,12 +214,12 @@ func newBrowser(t *testing.T) context.Context {
 			chromedp.Flag("headless", "new"),
 			chromedp.Flag("disable-gpu", true),
 			chromedp.Flag("no-sandbox", true),
-			chromedp.WSURLReadTimeout(30*time.Second),
+			chromedp.WSURLReadTimeout(browserLaunchTimeout),
 		)...)
 	t.Cleanup(cancelAlloc)
 	ctx, cancelBrowser := chromedp.NewContext(allocCtx)
 	t.Cleanup(cancelBrowser)
-	ctx, cancelTimeout := context.WithTimeout(ctx, 90*time.Second)
+	ctx, cancelTimeout := context.WithTimeout(ctx, browserBudget)
 	t.Cleanup(cancelTimeout)
 	t.Cleanup(func() {
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
