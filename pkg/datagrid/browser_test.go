@@ -361,6 +361,44 @@ func navigateReady(t *testing.T, ctx context.Context, target string) {
 	}
 }
 
+func TestBrowserAutoThemeInheritsForcedDocumentScheme(t *testing.T) {
+	server := browserServer(t)
+	defer server.Close()
+	ctx := newBrowser(t)
+	navigateReady(t, ctx, server.URL+"/")
+
+	var got struct {
+		AutoScheme         string `json:"autoScheme"`
+		AutoBackground     string `json:"autoBackground"`
+		DarkScheme         string `json:"darkScheme"`
+		DarkBackground     string `json:"darkBackground"`
+		RestoredAutoScheme string `json:"restoredAutoScheme"`
+	}
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
+		document.documentElement.style.colorScheme = 'light';
+		const grid = document.querySelector('#people');
+		const wrap = grid.querySelector('.datagrid-table-wrap');
+		const autoScheme = getComputedStyle(grid).colorScheme;
+		const autoBackground = getComputedStyle(wrap).backgroundColor;
+		grid.dataset.dgTheme = 'dark';
+		const darkScheme = getComputedStyle(grid).colorScheme;
+		const darkBackground = getComputedStyle(wrap).backgroundColor;
+		delete grid.dataset.dgTheme;
+		return {
+			autoScheme,
+			autoBackground,
+			darkScheme,
+			darkBackground,
+			restoredAutoScheme: getComputedStyle(grid).colorScheme,
+		};
+	})()`, &got)); err != nil {
+		t.Fatal(err)
+	}
+	if got.AutoScheme != "light" || got.RestoredAutoScheme != "light" || got.DarkScheme != "dark" || got.AutoBackground == got.DarkBackground {
+		t.Fatalf("document and grid color schemes did not compose: %#v", got)
+	}
+}
+
 func TestBrowserInteractionsPreserveRowsURLAndGridIsolation(t *testing.T) {
 	server := browserServer(t)
 	defer server.Close()
