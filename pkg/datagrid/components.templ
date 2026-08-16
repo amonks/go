@@ -1,0 +1,265 @@
+package datagrid
+
+import "strconv"
+
+// Head includes the complete, self-contained datagrid presentation and
+// behavior. Render it once in the document head.
+templ Head() {
+	@StyleForDocumentHead()
+	@ScriptForDocumentHead()
+}
+
+// StyleForDocumentHead renders only the embedded stylesheet.
+templ StyleForDocumentHead() {
+	@templ.Raw("<style id=\"monks-datagrid-style\">" + stylesheet + "</style>")
+}
+
+// ScriptForDocumentHead renders only the embedded custom-element script.
+templ ScriptForDocumentHead() {
+	@templ.Raw("<script id=\"monks-datagrid-script\">" + javascript + "</script>")
+}
+
+// Shell renders the common controls, responsive frame, status, empty state,
+// and pagination around its child table. It is the low-level entry point for
+// callers that populate or render their own table.
+templ Shell(props ShellProps) {
+	{{ props = normalizeShellProps(props) }}
+	<monks-datagrid
+		id={ props.ID }
+		aria-label={ props.Label }
+		data-dg-features={ featuresAttribute(props.Disabled) }
+		data-dg-query-prefix={ props.QueryPrefix }
+		data-dg-page-size={ strconv.Itoa(props.PageSize) }
+		data-dg-page-sizes={ intsJSON(props.PageSizes) }
+		data-dg-typeahead-at={ strconv.Itoa(props.FilterTypeaheadAt) }
+		data-dg-initial-state={ stateJSON(props.InitialState) }
+		if props.ClientHooks != "" {
+			data-dg-hooks={ props.ClientHooks }
+		}
+		if props.Theme != ThemeAuto {
+			data-dg-theme={ string(props.Theme) }
+		}
+	>
+		<div class="datagrid-layout">
+			if hasPanel(props) {
+				@Controls(props)
+			}
+			<section class="datagrid-content" aria-label="Table results">
+				<div class="datagrid-statusbar">
+					@ResultSummary(ControlProps{GridID: props.ID, InitialRows: props.InitialRows})
+					if props.Disabled&FeaturePagination == 0 && len(props.PageSizes) > 1 {
+						@PageSizeControl(ControlProps{GridID: props.ID, PageSize: props.PageSize, PageSizes: props.PageSizes})
+					}
+				</div>
+				<div class="datagrid-table-wrap">
+					{ children... }
+				</div>
+				@EmptyState(ControlProps{GridID: props.ID, EmptyText: props.EmptyText, Empty: props.Empty})
+				if props.Disabled&FeaturePagination == 0 {
+					@PaginationControl(ControlProps{GridID: props.ID})
+				}
+			</section>
+		</div>
+	</monks-datagrid>
+}
+
+// Controls renders the panel that container queries place above or beside the
+// table. Supplemental content is kept in the same panel.
+templ Controls(props ShellProps) {
+	<aside class="datagrid-panel" aria-label="Table controls">
+		if props.ControlPanel != nil {
+			<div class="datagrid-control-override">
+				@props.ControlPanel
+			</div>
+		} else {
+			if props.Disabled&FeatureSearch == 0 {
+				@SearchControl(ControlProps{GridID: props.ID, SearchPlaceholder: props.SearchPlaceholder})
+			}
+			if props.Disabled&FeatureFilters == 0 {
+				@FilterControls(ControlProps{GridID: props.ID})
+				<button type="button" class="datagrid-clear-all" data-dg-role="clear" hidden>Clear all</button>
+			}
+		}
+		if props.Extra != nil {
+			<div class="datagrid-extra">
+				@props.Extra
+			</div>
+		}
+	</aside>
+}
+
+// SearchControl is the standalone, labelled full-text search control.
+templ SearchControl(props ControlProps) {
+	<div class="datagrid-search-wrap">
+		<label class="datagrid-visually-hidden" for={ props.GridID + "-search" }>Search this table</label>
+		<svg class="datagrid-search-icon" aria-hidden="true" viewBox="0 0 20 20" width="18" height="18"><circle cx="8.5" cy="8.5" r="5.25" fill="none" stroke="currentColor" stroke-width="1.6"></circle><path d="m12.4 12.4 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path></svg>
+		<input
+			id={ props.GridID + "-search" }
+			class="datagrid-search-input"
+			data-dg-role="search"
+			type="search"
+			placeholder={ props.SearchPlaceholder }
+			autocomplete="off"
+			aria-controls={ props.GridID + "-table" }
+		/>
+	</div>
+}
+
+// FilterControls is populated from the table's annotated headers and cells.
+templ FilterControls(props ControlProps) {
+	<div id={ props.GridID + "-filters" } class="datagrid-filterbar" data-dg-role="filters" aria-label="Column filters"></div>
+}
+
+// ResultSummary reports the matching range through a polite live region.
+templ ResultSummary(props ControlProps) {
+	<p
+		id={ props.GridID + "-summary" }
+		class="datagrid-summary"
+		data-dg-role="summary"
+		role="status"
+		aria-live="polite"
+		aria-atomic="true"
+	>
+		{ initialSummary(props.InitialRows) }
+	</p>
+}
+
+// PageSizeControl lets a caller-provided set of page sizes be selected.
+templ PageSizeControl(props ControlProps) {
+	<label class="datagrid-page-size">
+		<span>Rows</span>
+		<select data-dg-role="page-size" aria-label="Rows per page">
+			for _, size := range props.PageSizes {
+				<option value={ strconv.Itoa(size) } selected?={ size == props.PageSize }>{ strconv.Itoa(size) }</option>
+			}
+		</select>
+	</label>
+}
+
+// PaginationControl is populated with the current page window by the element.
+templ PaginationControl(props ControlProps) {
+	<nav
+		id={ props.GridID + "-pagination" }
+		class="datagrid-pagination"
+		data-dg-role="pagination"
+		aria-label="Table pages"
+	></nav>
+}
+
+// EmptyState is shown when the active search and filters match no rows.
+templ EmptyState(props ControlProps) {
+	<div class="datagrid-empty" data-dg-role="empty" hidden>
+		<svg aria-hidden="true" viewBox="0 0 32 32" width="32" height="32"><rect x="5" y="7" width="22" height="18" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"></rect><path d="M10 12h12M10 16h8M10 20h5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path></svg>
+		if props.Empty != nil {
+			@props.Empty
+		} else {
+			<p>{ props.EmptyText }</p>
+		}
+	</div>
+}
+
+// HeaderCell renders the metadata and accessible sort button consumed by the
+// web component. It can be used in a caller-owned table inside Shell.
+templ HeaderCell(props HeaderCellProps) {
+	{{ props.Align = resolvedColumnAlign(props.Align, props.SortKind) }}
+	<th
+		scope="col"
+		data-dg-column={ props.Column }
+		data-dg-label={ props.Label }
+		data-dg-sort-kind={ sortKindValue(props.SortKind) }
+		if props.Align != "" {
+			data-dg-align={ props.Align }
+		}
+		data-dg-filter={ filterUIValue(props.FilterUI, props.Disabled) }
+		data-dg-search={ strconv.FormatBool(props.Disabled&FeatureSearch == 0) }
+		class={ props.Class }
+		if initialAriaSort(props) != "" {
+			aria-sort={ initialAriaSort(props) }
+		}
+	>
+		if props.Disabled&FeatureSort == 0 {
+			<button type="button" class="datagrid-sort" data-dg-role="sort" data-dg-column={ props.Column } disabled>
+				<span class="datagrid-header-label">
+					if props.Content != nil {
+						@props.Content
+					} else {
+						{ props.Label }
+					}
+				</span>
+				<span class="datagrid-sort-icon" aria-hidden="true"></span>
+			</button>
+		} else if props.Content != nil {
+			@props.Content
+		} else {
+			{ props.Label }
+		}
+	</th>
+}
+
+// Row annotates a table row while leaving its cells as templ children.
+templ Row(props RowProps) {
+	<tr
+		data-dg-row
+		data-dg-row-id={ props.ID }
+		class={ props.Class }
+		if props.HasSearch {
+			data-dg-search={ props.Search }
+		}
+	>
+		{ children... }
+	</tr>
+}
+
+// Cell annotates a table cell with independent search, sort, and filter
+// projections while preserving arbitrary templ content.
+templ Cell(props CellProps) {
+	<td
+		data-dg-column={ props.Column }
+		data-dg-value={ props.Value }
+		if props.HasSearchValue || props.SearchValue != "" {
+			data-dg-search-value={ props.SearchValue }
+		}
+		if props.HasSortValue || props.SortValue != "" {
+			data-dg-sort-value={ props.SortValue }
+		}
+		if props.HasFilterValues || props.FilterValues != nil {
+			data-dg-filter-values={ filterValuesJSON(props.FilterValues) }
+		}
+		class={ props.Class }
+		if props.Align != "" {
+			data-dg-align={ props.Align }
+		}
+	>
+		if props.Content != nil {
+			@props.Content
+		} else {
+			{ props.Value }
+		}
+	</td>
+}
+
+templ renderTable(view tableView) {
+	@Shell(view.Shell) {
+		<table id={ view.Shell.ID + "-table" } class="datagrid-table" aria-describedby={ view.Shell.ID + "-summary" }>
+			if view.Caption != "" {
+				<caption>{ view.Caption }</caption>
+			}
+			<thead>
+				<tr>
+					for _, header := range view.Headers {
+						@HeaderCell(header)
+					}
+				</tr>
+			</thead>
+			<tbody>
+				for _, row := range view.Rows {
+					@Row(row.Props) {
+						for _, cell := range row.Cells {
+							@Cell(cell)
+						}
+					}
+				}
+			</tbody>
+		</table>
+	}
+}
