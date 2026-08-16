@@ -1,0 +1,834 @@
+monks-datagrid {
+  --datagrid-bg: var(--surface, light-dark(#ffffff, #111722));
+  --datagrid-panel: var(--surface-2, var(--surface-subtle, light-dark(#f7f9fc, #171f2c)));
+  --datagrid-raised: var(--surface-3, var(--surface-raised, light-dark(#ffffff, #1c2533)));
+  --datagrid-text: var(--text, var(--fg, light-dark(#172033, #e7edf7)));
+  --datagrid-muted: var(--text-2, var(--muted, light-dark(#667085, #99a5b7)));
+  --datagrid-faint: var(--text-3, light-dark(#98a2b3, #69778c));
+  --datagrid-border: var(--border, light-dark(#dfe4ec, #344054));
+  --datagrid-border-strong: var(--border-strong, light-dark(#c8d0dc, #475467));
+  --datagrid-accent: var(--accent-solid, var(--accent, light-dark(#3457d5, #8ba4ff)));
+  --datagrid-accent-strong: light-dark(#2949bd, #a9b9ff);
+  --datagrid-accent-soft: light-dark(#edf1ff, #222e56);
+  --datagrid-hover: var(--row-hover, light-dark(#f4f7fc, #1a2432));
+  --datagrid-stripe: light-dark(#fafbfd, #141c28);
+  --datagrid-danger: light-dark(#b42318, #ff9b8f);
+  --datagrid-focus: light-dark(#3457d5, #9cb0ff);
+  --datagrid-shadow: var(--shadow, 0 18px 42px rgb(16 24 40 / 0.12), 0 2px 8px rgb(16 24 40 / 0.08));
+  --datagrid-radius: 0.75rem;
+  --datagrid-control-radius: 0.55rem;
+
+  display: block;
+  inline-size: 100%;
+  min-inline-size: 0;
+  color: var(--datagrid-text);
+  color-scheme: light dark;
+  container-name: datagrid;
+  container-type: inline-size;
+  font-family: inherit;
+  font-size: 0.875rem;
+  line-height: 1.45;
+  text-align: start;
+}
+
+monks-datagrid[data-dg-theme="light"] {
+  color-scheme: light;
+}
+
+monks-datagrid[data-dg-theme="dark"] {
+  color-scheme: dark;
+}
+
+monks-datagrid *,
+monks-datagrid *::before,
+monks-datagrid *::after {
+  box-sizing: border-box;
+}
+
+monks-datagrid [hidden] {
+  display: none !important;
+}
+
+monks-datagrid .datagrid-visually-hidden {
+  position: absolute !important;
+  inline-size: 1px !important;
+  block-size: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0 0 0 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+monks-datagrid .datagrid-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.75rem;
+  min-inline-size: 0;
+}
+
+monks-datagrid:not([data-dg-ready]) .datagrid-layout {
+  display: block;
+}
+
+monks-datagrid:not([data-dg-ready]) .datagrid-panel:not(:has(.datagrid-control-override:not(:empty), .datagrid-extra:not(:empty))),
+monks-datagrid:not([data-dg-ready]) .datagrid-statusbar,
+monks-datagrid:not([data-dg-ready]) .datagrid-pagination,
+monks-datagrid:not([data-dg-ready]) .datagrid-empty {
+  display: none;
+}
+
+monks-datagrid:not([data-dg-ready]) :is(.datagrid-search-wrap, .datagrid-filterbar, .datagrid-clear-all) {
+  display: none;
+}
+
+monks-datagrid .datagrid-panel {
+  position: relative;
+  z-index: 4;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+  min-inline-size: 0;
+  padding: 0.7rem;
+  border: 1px solid var(--datagrid-border);
+  border-radius: var(--datagrid-radius);
+  background: var(--datagrid-panel);
+}
+
+monks-datagrid .datagrid-panel:not(:has(.datagrid-search-wrap, .datagrid-filter, .datagrid-control-override:not(:empty), .datagrid-extra:not(:empty))) {
+  display: none;
+}
+
+monks-datagrid .datagrid-layout:not(:has(
+  > .datagrid-panel > .datagrid-search-wrap,
+  > .datagrid-panel .datagrid-filter,
+  > .datagrid-panel > .datagrid-control-override:not(:empty),
+  > .datagrid-panel > .datagrid-extra:not(:empty)
+)) > .datagrid-content {
+  grid-column: 1 / -1;
+}
+
+monks-datagrid .datagrid-search-wrap {
+  position: relative;
+  flex: 1 1 15rem;
+  min-inline-size: min(15rem, 100%);
+}
+
+monks-datagrid .datagrid-search-input,
+monks-datagrid .datagrid-filter-search,
+monks-datagrid .datagrid-page-size select {
+  appearance: none;
+  min-block-size: 2.45rem;
+  border: 1px solid var(--datagrid-border-strong);
+  border-radius: var(--datagrid-control-radius);
+  outline: none;
+  background: var(--datagrid-bg);
+  color: var(--datagrid-text);
+  font: inherit;
+}
+
+monks-datagrid .datagrid-search-input {
+  inline-size: 100%;
+  padding: 0.5rem 0.8rem 0.5rem 2.35rem;
+  box-shadow: 0 1px 2px rgb(16 24 40 / 0.04);
+}
+
+monks-datagrid .datagrid-search-input::placeholder,
+monks-datagrid .datagrid-filter-search::placeholder {
+  color: var(--datagrid-faint);
+  opacity: 1;
+}
+
+monks-datagrid .datagrid-search-icon {
+  position: absolute;
+  z-index: 1;
+  inset-block-start: 50%;
+  inset-inline-start: 0.78rem;
+  translate: 0 -50%;
+  color: var(--datagrid-muted);
+  pointer-events: none;
+}
+
+monks-datagrid .datagrid-filterbar,
+monks-datagrid .datagrid-generated-filters {
+  display: contents;
+}
+
+monks-datagrid .datagrid-filter {
+  position: relative;
+  flex: 0 1 auto;
+  min-inline-size: 0;
+}
+
+monks-datagrid .datagrid-filter > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.55rem;
+  min-block-size: 2.45rem;
+  max-inline-size: 14rem;
+  padding: 0.48rem 0.65rem 0.48rem 0.75rem;
+  border: 1px solid var(--datagrid-border-strong);
+  border-radius: var(--datagrid-control-radius);
+  background: var(--datagrid-bg);
+  color: var(--datagrid-text);
+  font-weight: 600;
+  line-height: 1.2;
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  box-shadow: 0 1px 2px rgb(16 24 40 / 0.03);
+}
+
+monks-datagrid .datagrid-filter > summary::-webkit-details-marker {
+  display: none;
+}
+
+monks-datagrid .datagrid-filter > summary::after {
+  content: "";
+  flex: 0 0 auto;
+  inline-size: 0.42rem;
+  block-size: 0.42rem;
+  margin-inline: 0.16rem 0.08rem;
+  border-inline-end: 1.5px solid currentColor;
+  border-block-end: 1.5px solid currentColor;
+  rotate: 45deg;
+  translate: 0 -0.12rem;
+  color: var(--datagrid-muted);
+  transition: rotate 140ms ease, translate 140ms ease;
+}
+
+monks-datagrid .datagrid-filter[open] > summary::after {
+  rotate: 225deg;
+  translate: 0 0.12rem;
+}
+
+monks-datagrid .datagrid-filter.is-active > summary {
+  border-color: var(--datagrid-accent);
+  background: var(--datagrid-accent-soft);
+  color: var(--datagrid-accent-strong);
+}
+
+monks-datagrid .datagrid-filter-selection {
+  overflow: hidden;
+  min-inline-size: 1.7rem;
+  max-inline-size: 7rem;
+  color: var(--datagrid-muted);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+monks-datagrid .datagrid-filter.is-active .datagrid-filter-selection {
+  color: inherit;
+}
+
+monks-datagrid .datagrid-filter-options {
+  position: absolute;
+  z-index: 20;
+  inset-block-start: calc(100% + 0.4rem);
+  inset-inline-start: 0;
+  display: grid;
+  gap: 0.12rem;
+  inline-size: min(19rem, calc(100cqi - 1.4rem));
+  max-block-size: 18rem;
+  padding: 0.45rem;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--datagrid-border-strong);
+  border-radius: 0.7rem;
+  background: var(--datagrid-raised);
+  box-shadow: var(--datagrid-shadow);
+}
+
+monks-datagrid .datagrid-filter:has(> .datagrid-filter-search) > .datagrid-filter-options {
+  padding-block-start: 3.45rem;
+}
+
+monks-datagrid .datagrid-filter-search {
+  position: absolute;
+  z-index: 21;
+  inset-block-start: calc(100% + 0.85rem);
+  inset-inline-start: 0.45rem;
+  inline-size: min(18.1rem, calc(100cqi - 2.3rem));
+  padding: 0.48rem 0.65rem;
+}
+
+monks-datagrid .datagrid-filter:last-of-type > .datagrid-filter-options {
+  inset-inline: auto 0;
+}
+
+monks-datagrid .datagrid-filter:last-of-type > .datagrid-filter-search {
+  inset-inline: auto 0.45rem;
+}
+
+monks-datagrid .datagrid-filter-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.6rem;
+  min-block-size: 2.15rem;
+  padding: 0.38rem 0.45rem;
+  border-radius: 0.45rem;
+  color: var(--datagrid-text);
+  cursor: pointer;
+}
+
+monks-datagrid .datagrid-filter-option:hover {
+  background: var(--datagrid-hover);
+}
+
+monks-datagrid .datagrid-filter-option:has(input:focus-visible) {
+  outline: 2px solid var(--datagrid-focus);
+  outline-offset: -2px;
+}
+
+monks-datagrid .datagrid-filter-option:has(input:disabled) {
+  color: var(--datagrid-faint);
+  cursor: not-allowed;
+}
+
+monks-datagrid .datagrid-filter-option input[type="checkbox"] {
+  inline-size: 1rem;
+  block-size: 1rem;
+  margin: 0;
+  accent-color: var(--datagrid-accent);
+}
+
+monks-datagrid .datagrid-filter-option input[type="checkbox"]:focus-visible {
+  outline: none;
+}
+
+monks-datagrid .datagrid-filter-option-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+monks-datagrid .datagrid-filter-count {
+  min-inline-size: 1.55rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 999px;
+  background: var(--datagrid-panel);
+  color: var(--datagrid-muted);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+monks-datagrid .datagrid-clear-all,
+monks-datagrid .datagrid-filter-clear {
+  appearance: none;
+  min-block-size: 2.2rem;
+  padding: 0.35rem 0.55rem;
+  border: 0;
+  border-radius: 0.4rem;
+  background: transparent;
+  color: var(--datagrid-accent);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+monks-datagrid .datagrid-clear-all:hover,
+monks-datagrid .datagrid-filter-clear:hover {
+  background: var(--datagrid-accent-soft);
+}
+
+monks-datagrid .datagrid-control-override,
+monks-datagrid .datagrid-extra {
+  flex: 1 1 100%;
+  min-inline-size: 0;
+  inline-size: 100%;
+  padding-block-start: 0.15rem;
+}
+
+monks-datagrid .datagrid-content {
+  min-inline-size: 0;
+}
+
+monks-datagrid .datagrid-statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  min-block-size: 2.1rem;
+  margin-block-end: 0.45rem;
+  padding-inline: 0.15rem;
+}
+
+monks-datagrid .datagrid-summary {
+  margin: 0;
+  color: var(--datagrid-muted);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+monks-datagrid .datagrid-page-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--datagrid-muted);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+monks-datagrid .datagrid-page-size select {
+  min-block-size: 1.95rem;
+  padding: 0.25rem 1.65rem 0.25rem 0.55rem;
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    calc(100% - 0.75rem) 50%,
+    calc(100% - 0.5rem) 50%;
+  background-repeat: no-repeat;
+  background-size: 0.25rem 0.25rem, 0.25rem 0.25rem;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+monks-datagrid .datagrid-table-wrap {
+  position: relative;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  overflow: auto;
+  overscroll-behavior-inline: contain;
+  border: 1px solid var(--datagrid-border);
+  border-radius: var(--datagrid-radius);
+  background: var(--datagrid-bg);
+  box-shadow: 0 1px 2px rgb(16 24 40 / 0.025);
+  scrollbar-color: var(--datagrid-border-strong) transparent;
+}
+
+monks-datagrid .datagrid-table {
+  inline-size: 100%;
+  min-inline-size: max-content;
+  margin: 0;
+  border: 0;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+}
+
+monks-datagrid .datagrid-table caption {
+  padding: 0.85rem 0.9rem;
+  border-block-end: 1px solid var(--datagrid-border);
+  background: var(--datagrid-panel);
+  color: var(--datagrid-text);
+  font-size: 0.92rem;
+  font-weight: 700;
+  text-align: start;
+}
+
+monks-datagrid .datagrid-table th,
+monks-datagrid .datagrid-table td {
+  min-inline-size: 7rem;
+  padding: 0.72rem 0.85rem;
+  border: 0;
+  border-block-end: 1px solid var(--datagrid-border);
+  color: inherit;
+  font: inherit;
+  line-height: 1.35;
+  text-align: start;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+monks-datagrid .datagrid-table th {
+  position: sticky;
+  z-index: 2;
+  inset-block-start: 0;
+  background: var(--datagrid-panel);
+  color: var(--datagrid-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.025em;
+  text-transform: uppercase;
+}
+
+monks-datagrid .datagrid-table th + th,
+monks-datagrid .datagrid-table td + td {
+  border-inline-start: 1px solid color-mix(in srgb, var(--datagrid-border) 62%, transparent);
+}
+
+monks-datagrid .datagrid-table tbody > tr:nth-child(even of :not([hidden])) td {
+  background: var(--datagrid-stripe);
+}
+
+monks-datagrid .datagrid-table tbody tr:hover td {
+  background: var(--datagrid-hover);
+}
+
+monks-datagrid .datagrid-table tbody tr:last-child td {
+  border-block-end: 0;
+}
+
+monks-datagrid .datagrid-table td[data-dg-align="end"],
+monks-datagrid .datagrid-table th[data-dg-align="end"] {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+monks-datagrid .datagrid-table td[data-dg-align="center"],
+monks-datagrid .datagrid-table th[data-dg-align="center"] {
+  text-align: center;
+}
+
+monks-datagrid .datagrid-table th[data-dg-align="end"] .datagrid-sort {
+  justify-content: flex-end;
+}
+
+monks-datagrid .datagrid-table th[data-dg-align="center"] .datagrid-sort {
+  justify-content: center;
+}
+
+monks-datagrid .datagrid-sort {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.42rem;
+  inline-size: 100%;
+  margin: -0.38rem -0.45rem;
+  padding: 0.38rem 0.45rem;
+  border: 0;
+  border-radius: 0.38rem;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  text-align: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+monks-datagrid .datagrid-sort:hover {
+  background: var(--datagrid-hover);
+  color: var(--datagrid-text);
+}
+
+monks-datagrid .datagrid-sort-icon {
+  position: relative;
+  flex: 0 0 auto;
+  inline-size: 0.55rem;
+  block-size: 0.75rem;
+  opacity: 0.45;
+}
+
+monks-datagrid .datagrid-sort-icon::before,
+monks-datagrid .datagrid-sort-icon::after {
+  content: "";
+  position: absolute;
+  inset-inline-start: 0.08rem;
+  inline-size: 0.38rem;
+  block-size: 0.38rem;
+  border-inline-start: 1.5px solid currentColor;
+  border-block-start: 1.5px solid currentColor;
+}
+
+monks-datagrid .datagrid-sort-icon::before {
+  inset-block-start: 0;
+  rotate: 45deg;
+}
+
+monks-datagrid .datagrid-sort-icon::after {
+  inset-block-end: 0;
+  rotate: 225deg;
+}
+
+monks-datagrid .datagrid-table th[aria-sort="ascending"],
+monks-datagrid .datagrid-table th[aria-sort="descending"] {
+  background: var(--datagrid-accent-soft);
+  color: var(--datagrid-accent-strong);
+}
+
+monks-datagrid .datagrid-table th[aria-sort="ascending"] .datagrid-sort-icon,
+monks-datagrid .datagrid-table th[aria-sort="descending"] .datagrid-sort-icon {
+  opacity: 1;
+}
+
+monks-datagrid .datagrid-table th[aria-sort="ascending"] .datagrid-sort-icon::after,
+monks-datagrid .datagrid-table th[aria-sort="descending"] .datagrid-sort-icon::before {
+  opacity: 0.18;
+}
+
+monks-datagrid .datagrid-empty {
+  display: grid;
+  place-items: center;
+  gap: 0.55rem;
+  min-block-size: 10rem;
+  margin-block-start: 0.75rem;
+  padding: 1.5rem;
+  border: 1px dashed var(--datagrid-border-strong);
+  border-radius: var(--datagrid-radius);
+  background: var(--datagrid-panel);
+  color: var(--datagrid-muted);
+  text-align: center;
+}
+
+monks-datagrid .datagrid-empty svg {
+  color: var(--datagrid-faint);
+}
+
+monks-datagrid .datagrid-empty p {
+  max-inline-size: 28rem;
+  margin: 0;
+}
+
+monks-datagrid .datagrid-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  margin-block-start: 0.8rem;
+}
+
+monks-datagrid .datagrid-page {
+  appearance: none;
+  display: inline-grid;
+  place-items: center;
+  min-inline-size: 2.2rem;
+  min-block-size: 2.2rem;
+  padding: 0.3rem;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  outline: none;
+  background: transparent;
+  color: var(--datagrid-muted);
+  font: inherit;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+monks-datagrid .datagrid-page:hover:not(:disabled) {
+  border-color: var(--datagrid-border);
+  background: var(--datagrid-hover);
+  color: var(--datagrid-text);
+}
+
+monks-datagrid .datagrid-page.is-current {
+  border-color: var(--datagrid-accent);
+  background: var(--datagrid-accent-soft);
+  color: var(--datagrid-accent-strong);
+  opacity: 1;
+}
+
+monks-datagrid .datagrid-page:disabled:not(.is-current) {
+  color: var(--datagrid-faint);
+  cursor: default;
+  opacity: 0.45;
+}
+
+monks-datagrid .datagrid-page-ellipsis {
+  display: inline-grid;
+  place-items: center;
+  min-inline-size: 1.3rem;
+  min-block-size: 2.2rem;
+  color: var(--datagrid-faint);
+}
+
+monks-datagrid :where(button, input, select, summary):focus-visible {
+  outline: 2px solid var(--datagrid-focus);
+  outline-offset: 2px;
+}
+
+monks-datagrid .datagrid-pagination:focus-visible {
+  outline: 2px solid var(--datagrid-focus);
+  outline-offset: 2px;
+}
+
+monks-datagrid :where(button, input, select):disabled {
+  opacity: 0.55;
+}
+
+monks-datagrid:not([data-dg-ready]) .datagrid-sort:disabled {
+  opacity: 1;
+}
+
+@container datagrid (min-width: 52rem) {
+  monks-datagrid .datagrid-layout:has(
+    > .datagrid-panel > .datagrid-search-wrap,
+    > .datagrid-panel .datagrid-filter,
+    > .datagrid-panel > .datagrid-control-override:not(:empty),
+    > .datagrid-panel > .datagrid-extra:not(:empty)
+  ) {
+    grid-template-columns: minmax(13rem, 15rem) minmax(0, 1fr);
+    align-items: start;
+    gap: 1rem;
+  }
+
+  monks-datagrid .datagrid-panel {
+    position: sticky;
+    inset-block-start: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: 0.65rem;
+    min-inline-size: 0;
+  }
+
+  monks-datagrid .datagrid-search-wrap {
+    flex: 0 0 auto;
+    min-inline-size: 0;
+    inline-size: 100%;
+  }
+
+  monks-datagrid .datagrid-generated-filters {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    inline-size: 100%;
+  }
+
+  monks-datagrid .datagrid-filter {
+    inline-size: 100%;
+  }
+
+  monks-datagrid .datagrid-filter > summary {
+    inline-size: 100%;
+    max-inline-size: none;
+  }
+
+  monks-datagrid .datagrid-filter-options {
+    inline-size: min(19rem, calc(100cqi - 2rem));
+  }
+
+  monks-datagrid .datagrid-filter-search {
+    inline-size: min(18.1rem, calc(100cqi - 2.9rem));
+  }
+
+  monks-datagrid .datagrid-filter:last-of-type > .datagrid-filter-options {
+    inset-inline: 0 auto;
+  }
+
+  monks-datagrid .datagrid-filter:last-of-type > .datagrid-filter-search {
+    inset-inline: 0.45rem auto;
+  }
+
+  monks-datagrid .datagrid-clear-all,
+  monks-datagrid .datagrid-filter-clear {
+    align-self: flex-start;
+  }
+
+  monks-datagrid .datagrid-control-override,
+  monks-datagrid .datagrid-extra {
+    flex: 0 0 auto;
+    inline-size: 100%;
+    padding-block-start: 0.25rem;
+  }
+
+  monks-datagrid .datagrid-layout:has(
+    > .datagrid-panel > .datagrid-search-wrap,
+    > .datagrid-panel .datagrid-filter,
+    > .datagrid-panel > .datagrid-control-override:not(:empty),
+    > .datagrid-panel > .datagrid-extra:not(:empty)
+  ) > .datagrid-content {
+    grid-column: 2;
+  }
+}
+
+@container datagrid (max-width: 51.99rem) {
+  monks-datagrid .datagrid-filter[open] {
+    flex: 1 0 100%;
+  }
+
+  monks-datagrid .datagrid-filter[open] > summary {
+    inline-size: 100%;
+    max-inline-size: none;
+  }
+
+  monks-datagrid .datagrid-filter[open] > .datagrid-filter-search,
+  monks-datagrid .datagrid-filter[open] > .datagrid-filter-options {
+    position: static;
+    inline-size: 100%;
+    margin-block-start: 0.4rem;
+  }
+
+  monks-datagrid .datagrid-filter[open] > .datagrid-filter-search {
+    display: block;
+  }
+
+  monks-datagrid .datagrid-filter:has(> .datagrid-filter-search) > .datagrid-filter-options {
+    padding-block-start: 0.45rem;
+  }
+}
+
+@container datagrid (max-width: 31.99rem) {
+  monks-datagrid .datagrid-panel {
+    align-items: stretch;
+  }
+
+  monks-datagrid .datagrid-search-wrap {
+    flex-basis: 100%;
+  }
+
+  monks-datagrid .datagrid-filter > summary {
+    max-inline-size: 11rem;
+  }
+
+  monks-datagrid .datagrid-statusbar {
+    align-items: flex-start;
+  }
+
+  monks-datagrid .datagrid-page-first,
+  monks-datagrid .datagrid-page-last {
+    display: none;
+  }
+
+  monks-datagrid .datagrid-table th,
+  monks-datagrid .datagrid-table td {
+    padding-inline: 0.7rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  monks-datagrid *,
+  monks-datagrid *::before,
+  monks-datagrid *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+@media (forced-colors: active) {
+  monks-datagrid {
+    --datagrid-bg: Canvas;
+    --datagrid-panel: Canvas;
+    --datagrid-raised: Canvas;
+    --datagrid-text: CanvasText;
+    --datagrid-muted: CanvasText;
+    --datagrid-faint: GrayText;
+    --datagrid-border: ButtonBorder;
+    --datagrid-border-strong: ButtonBorder;
+    --datagrid-accent: LinkText;
+    --datagrid-accent-strong: LinkText;
+    --datagrid-accent-soft: Canvas;
+    --datagrid-hover: Canvas;
+    --datagrid-stripe: Canvas;
+    --datagrid-focus: Highlight;
+    --datagrid-shadow: none;
+  }
+
+  monks-datagrid .datagrid-filter.is-active > summary,
+  monks-datagrid .datagrid-page.is-current,
+  monks-datagrid .datagrid-table th[aria-sort="ascending"],
+  monks-datagrid .datagrid-table th[aria-sort="descending"] {
+    border: 2px solid Highlight;
+  }
+}
