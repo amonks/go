@@ -56,8 +56,8 @@ const (
 	FilterNone      FilterUI = "none"
 )
 
-// Theme controls color-scheme selection for one grid. ThemeAuto follows the
-// document/OS preference.
+// Theme controls color-scheme selection for one grid. ThemeAuto inherits the
+// document's scheme, including any OS preference the document advertises.
 type Theme string
 
 const (

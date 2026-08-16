@@ -22,7 +22,7 @@ monks-datagrid {
   inline-size: 100%;
   min-inline-size: 0;
   color: var(--datagrid-text);
-  color-scheme: light dark;
+  color-scheme: inherit;
   container-name: datagrid;
   container-type: inline-size;
   font-family: inherit;
