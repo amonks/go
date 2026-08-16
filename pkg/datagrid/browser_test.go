@@ -214,6 +214,10 @@ func newBrowser(t *testing.T) context.Context {
 			chromedp.Flag("headless", "new"),
 			chromedp.Flag("disable-gpu", true),
 			chromedp.Flag("no-sandbox", true),
+			// A container's /dev/shm is tiny; without this Chrome
+			// prints its devtools URL and then dies, and the dial
+			// times out (what CI's builder showed).
+			chromedp.Flag("disable-dev-shm-usage", true),
 			chromedp.WSURLReadTimeout(browserLaunchTimeout),
 		)...)
 	t.Cleanup(cancelAlloc)
