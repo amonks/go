@@ -291,7 +291,9 @@
     }
 
     refresh() {
+      const view = this._captureRefreshView();
       this._refresh({ readQuery: false, writeQuery: this._connected });
+      this._restoreRefreshView(view);
     }
 
     _ensurePrepared() {
@@ -318,6 +320,118 @@
       this._renderPageSizeOptions();
       this._renderFilters();
       this._apply({ writeQuery });
+    }
+
+    _captureRefreshView() {
+      const filters = new Map();
+      for (const details of this._generatedFilterDetails()) {
+        const column = details.getAttribute("data-dg-filter-column") || "";
+        if (column === "") {
+          continue;
+        }
+        const search = details.querySelector('[data-dg-role="filter-search"]');
+        filters.set(column, {
+          open: details.open,
+          search: search instanceof HTMLInputElement ? search.value : "",
+        });
+      }
+
+      const active = document.activeElement;
+      if (!(active instanceof HTMLElement) || !this.contains(active) || !this._owns(active)) {
+        return { filters, focus: null };
+      }
+      const attributes = {};
+      for (const name of [
+        "data-dg-role",
+        "data-dg-filter-column",
+        "data-dg-column",
+        "data-dg-page",
+        "data-dg-page-action",
+        "type",
+        "value",
+      ]) {
+        if (active.hasAttribute(name)) {
+          attributes[name] = active.getAttribute(name) || "";
+        }
+      }
+      const focus = {
+        element: active,
+        tagName: active.tagName.toLowerCase(),
+        id: active.id,
+        attributes,
+        filterColumn: active.closest("details[data-dg-filter-column]")
+          ?.getAttribute("data-dg-filter-column") || "",
+      };
+      if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) {
+        focus.selectionStart = active.selectionStart;
+        focus.selectionEnd = active.selectionEnd;
+        focus.selectionDirection = active.selectionDirection;
+      }
+      return { filters, focus };
+    }
+
+    _restoreRefreshView(view) {
+      if (!view) {
+        return;
+      }
+      for (const [column, state] of view.filters) {
+        const details = this._generatedFilterDetails()
+          .find((candidate) => candidate.getAttribute("data-dg-filter-column") === column);
+        if (!details) {
+          continue;
+        }
+        details.open = state.open;
+        const search = details.querySelector('[data-dg-role="filter-search"]');
+        if (search instanceof HTMLInputElement) {
+          search.value = state.search;
+          this._filterLocalOptions(search);
+        }
+      }
+
+      const bookmark = view.focus;
+      if (!bookmark) {
+        return;
+      }
+      let target = bookmark.element.isConnected && this.contains(bookmark.element)
+        ? bookmark.element
+        : null;
+      if (!target && bookmark.id !== "") {
+        const byID = document.getElementById(bookmark.id);
+        if (byID instanceof HTMLElement && this.contains(byID) && this._owns(byID)) {
+          target = byID;
+        }
+      }
+      if (!target && (bookmark.filterColumn !== "" || Object.keys(bookmark.attributes).length > 0)) {
+        target = this._findAllOwned(bookmark.tagName).find((candidate) => {
+          if (!(candidate instanceof HTMLElement)) {
+            return false;
+          }
+          for (const [name, value] of Object.entries(bookmark.attributes)) {
+            if (!candidate.hasAttribute(name) || (candidate.getAttribute(name) || "") !== value) {
+              return false;
+            }
+          }
+          return (candidate.closest("details[data-dg-filter-column]")
+            ?.getAttribute("data-dg-filter-column") || "") === bookmark.filterColumn;
+        }) || null;
+      }
+      if (!target || target.closest("tr[data-dg-row]")?.hidden) {
+        return;
+      }
+      if (document.activeElement !== target) {
+        target.focus({ preventScroll: true });
+      }
+      if (
+        bookmark.selectionStart !== null && bookmark.selectionStart !== undefined &&
+        bookmark.selectionEnd !== null && bookmark.selectionEnd !== undefined &&
+        (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)
+      ) {
+        target.setSelectionRange(
+          bookmark.selectionStart,
+          bookmark.selectionEnd,
+          bookmark.selectionDirection || undefined,
+        );
+      }
     }
 
     _configure() {
@@ -392,6 +506,12 @@
             this._features.has("search") && isEnabledValue(searchMode),
         });
       }
+    }
+
+    _generatedFilterDetails() {
+      return this._findAllOwned(
+        '[data-dg-generated-filters=""] > details[data-dg-filter-column]',
+      );
     }
 
     _readDefaults() {

@@ -1012,6 +1012,56 @@ func TestBrowserGeneratedControlsHooksAndPopstate(t *testing.T) {
 	}
 }
 
+func TestBrowserRefreshPreservesGeneratedFilterInteraction(t *testing.T) {
+	server := browserServer(t)
+	defer server.Close()
+	ctx := newBrowser(t)
+	navigateReady(t, ctx, server.URL+"/")
+
+	var got struct {
+		Open              bool     `json:"open"`
+		Value             string   `json:"value"`
+		Focused           bool     `json:"focused"`
+		SelectionStart    int      `json:"selectionStart"`
+		SelectionEnd      int      `json:"selectionEnd"`
+		VisibleOptionText []string `json:"visibleOptionText"`
+	}
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
+		const grid = document.querySelector('#people');
+		const details = grid.querySelector('details[data-dg-filter-column="city"]');
+		details.open = true;
+		const input = details.querySelector('[data-dg-role="filter-search"]');
+		input.value = 'sao';
+		input.dispatchEvent(new Event('input', {bubbles:true}));
+		input.focus();
+		input.setSelectionRange(1, 3, 'backward');
+
+		const row = grid.querySelector('[data-dg-row-id="person-00"]').cloneNode(true);
+		row.dataset.dgRowId = 'refresh-interaction';
+		grid.querySelector('tbody').append(row);
+		grid.refresh();
+
+		const replacementDetails = grid.querySelector('details[data-dg-filter-column="city"]');
+		const replacement = replacementDetails.querySelector('[data-dg-role="filter-search"]');
+		return {
+			open: replacementDetails.open,
+			value: replacement.value,
+			focused: document.activeElement === replacement,
+			selectionStart: replacement.selectionStart,
+			selectionEnd: replacement.selectionEnd,
+			visibleOptionText: [...replacementDetails.querySelectorAll(
+				'label[data-dg-filter-value]:not([hidden]) .datagrid-filter-option-label',
+			)].map(label => label.textContent),
+		};
+	})()`, &got)); err != nil {
+		t.Fatal(err)
+	}
+	if !got.Open || got.Value != "sao" || !got.Focused || got.SelectionStart != 1 || got.SelectionEnd != 3 ||
+		!slices.Equal(got.VisibleOptionText, []string{"São Paulo"}) {
+		t.Fatalf("refresh interaction state = %#v", got)
+	}
+}
+
 func historyURL(t *testing.T, ctx context.Context) string {
 	t.Helper()
 	var value string
