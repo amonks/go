@@ -399,6 +399,38 @@ func TestBrowserAutoThemeInheritsForcedDocumentScheme(t *testing.T) {
 	}
 }
 
+func TestBrowserClosedFilterPopoversStayOutOfNarrowLayout(t *testing.T) {
+	server := browserServer(t)
+	defer server.Close()
+	ctx := newBrowser(t)
+	navigateReady(t, ctx, server.URL+"/")
+
+	var got struct {
+		SearchDisplay  string `json:"searchDisplay"`
+		OptionsDisplay string `json:"optionsDisplay"`
+		ViewportWidth  int    `json:"viewportWidth"`
+		DocumentWidth  int    `json:"documentWidth"`
+	}
+	if err := chromedp.Run(ctx,
+		chromedp.EmulateViewport(420, 900),
+		chromedp.Evaluate(`(() => {
+			const filter = document.querySelector('#people details[data-dg-filter-column="city"]');
+			filter.open = false;
+			return {
+				searchDisplay: getComputedStyle(filter.querySelector('.datagrid-filter-search')).display,
+				optionsDisplay: getComputedStyle(filter.querySelector('.datagrid-filter-options')).display,
+				viewportWidth: document.documentElement.clientWidth,
+				documentWidth: document.documentElement.scrollWidth,
+			};
+		})()`, &got),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if got.SearchDisplay != "none" || got.OptionsDisplay != "none" || got.DocumentWidth > got.ViewportWidth {
+		t.Fatalf("closed filter affected narrow layout: %#v", got)
+	}
+}
+
 func TestBrowserInteractionsPreserveRowsURLAndGridIsolation(t *testing.T) {
 	server := browserServer(t)
 	defer server.Close()
