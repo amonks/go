@@ -225,6 +225,13 @@ monks-datagrid .datagrid-filter.is-active .datagrid-filter-selection {
   color: inherit;
 }
 
+monks-datagrid .datagrid-filter:not([open]) > :is(
+  .datagrid-filter-search,
+  .datagrid-filter-options
+) {
+  display: none;
+}
+
 monks-datagrid .datagrid-filter-options {
   position: absolute;
   z-index: 20;
