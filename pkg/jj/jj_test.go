@@ -618,3 +618,167 @@ func TestAbandon_EmptyRevset(t *testing.T) {
 		t.Errorf("abandon of empty revset should succeed, got %v", err)
 	}
 }
+
+func TestChangeEmptyAt(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+	client := jj.New()
+
+	if err := client.Init(tmpDir); err != nil {
+		t.Fatalf("failed to init jj repo: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "a.txt"), []byte("hello"), 0644); err != nil {
+		t.Fatalf("write a.txt: %v", err)
+	}
+	if err := client.Commit(tmpDir, "non-empty change"); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	empty, err := client.ChangeEmptyAt(tmpDir, "@-")
+	if err != nil {
+		t.Fatalf("ChangeEmptyAt @-: %v", err)
+	}
+	if empty {
+		t.Error("expected @- to be non-empty")
+	}
+	empty, err = client.ChangeEmptyAt(tmpDir, "@")
+	if err != nil {
+		t.Fatalf("ChangeEmptyAt @: %v", err)
+	}
+	if !empty {
+		t.Error("expected @ to be empty")
+	}
+}
+
+func TestDescribeAt(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+	client := jj.New()
+
+	if err := client.Init(tmpDir); err != nil {
+		t.Fatalf("failed to init jj repo: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "a.txt"), []byte("hello"), 0644); err != nil {
+		t.Fatalf("write a.txt: %v", err)
+	}
+	if err := client.Commit(tmpDir, "original message"); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	if err := client.DescribeAt(tmpDir, "@-", "rewritten message"); err != nil {
+		t.Fatalf("DescribeAt: %v", err)
+	}
+	desc, err := client.DescriptionAt(tmpDir, "@-")
+	if err != nil {
+		t.Fatalf("description: %v", err)
+	}
+	if !strings.Contains(desc, "rewritten message") {
+		t.Errorf("expected rewritten description, got %q", desc)
+	}
+}
+
+func TestSquashInto_MovesPathsForward(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+	client := jj.New()
+
+	if err := client.Init(tmpDir); err != nil {
+		t.Fatalf("failed to init jj repo: %v", err)
+	}
+
+	// c1 touches code.txt and churn.txt; c2 touches only code.txt; @ is
+	// the destination.
+	if err := os.WriteFile(filepath.Join(tmpDir, "code.txt"), []byte("v1\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "churn.txt"), []byte("churn\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Commit(tmpDir, "c1"); err != nil {
+		t.Fatal(err)
+	}
+	c1, err := client.ChangeIDAt(tmpDir, "@-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "code.txt"), []byte("v2\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Commit(tmpDir, "c2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.DescribeAt(tmpDir, "@", "destination"); err != nil {
+		t.Fatal(err)
+	}
+	dest, err := client.ChangeIDAt(tmpDir, "@")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := client.SquashInto(tmpDir, c1, dest, []string{"churn.txt"}); err != nil {
+		t.Fatalf("SquashInto: %v", err)
+	}
+
+	// churn.txt moved to the destination; c1 keeps code.txt and its
+	// message; the destination keeps its own message.
+	if _, err := client.FileShow(tmpDir, c1, "churn.txt"); err == nil {
+		t.Error("expected churn.txt to be gone from c1")
+	}
+	content, err := client.FileShow(tmpDir, dest, "churn.txt")
+	if err != nil {
+		t.Fatalf("FileShow churn.txt at destination: %v", err)
+	}
+	if string(content) != "churn\n" {
+		t.Errorf("unexpected churn.txt content %q", content)
+	}
+	desc, err := client.DescriptionAt(tmpDir, dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(desc, "destination") {
+		t.Errorf("expected destination to keep its message, got %q", desc)
+	}
+	desc, err = client.DescriptionAt(tmpDir, c1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(desc, "c1") {
+		t.Errorf("expected c1 to keep its message, got %q", desc)
+	}
+}
+
+func TestSquashInto_RequiresPaths(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+	client := jj.New()
+
+	if err := client.Init(tmpDir); err != nil {
+		t.Fatalf("failed to init jj repo: %v", err)
+	}
+	if err := client.SquashInto(tmpDir, "@-", "@", nil); err == nil {
+		t.Error("expected error for empty paths")
+	}
+}
+
+func TestDescribeAt_ClearDescription(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+	client := jj.New()
+
+	if err := client.Init(tmpDir); err != nil {
+		t.Fatalf("failed to init jj repo: %v", err)
+	}
+	if err := client.DescribeAt(tmpDir, "@", "temporary"); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.DescribeAt(tmpDir, "@", ""); err != nil {
+		t.Fatalf("DescribeAt with empty message: %v", err)
+	}
+	desc, err := client.DescriptionAt(tmpDir, "@")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if desc != "" {
+		t.Errorf("expected cleared description, got %q", desc)
+	}
+}
