@@ -84,7 +84,6 @@ type StreamHandle struct {
 	model string
 	api   API
 	start time.Time
-	ctx   context.Context
 }
 
 // Wait blocks until the stream completes and returns the final message.
@@ -96,11 +95,10 @@ func (h *StreamHandle) Wait() (AssistantMessage, error) {
 	select {
 	case msg := <-h.done:
 		if !h.start.IsZero() {
-			// Only handles built by Stream log and record; a wrapper
-			// handle re-delivering an inner stream's message must not
-			// count its usage twice.
+			// Only handles built by Stream log; a wrapper handle
+			// re-delivering an inner stream's message must not log
+			// the completion twice.
 			logInvocationDone(h, msg)
-			recordUsage(h.ctx, msg)
 		}
 		return msg, nil
 	case err := <-h.errCh:
@@ -167,7 +165,6 @@ func Stream(ctx context.Context, model Model, req Request, opts StreamOptions) (
 	handle.model = model.ID
 	handle.api = model.API
 	handle.start = start
-	handle.ctx = ctx
 	return handle, nil
 }
 
