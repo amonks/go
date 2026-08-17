@@ -98,10 +98,9 @@ func browserOptions(id string) Options[browserPerson] {
 	name.Cell = func(person browserPerson) templ.Component { return strongCell(person.Name) }
 	name.RowHeader = true
 	return Options[browserPerson]{
-		ID:        id,
-		Caption:   "Computing pioneers",
-		PageSize:  5,
-		PageSizes: []int{5, 10},
+		ID:       id,
+		Caption:  "Computing pioneers",
+		PageSize: 5,
 		Columns: []Column[browserPerson]{
 			name,
 			TextColumn("team", "Team", func(person browserPerson) string { return person.Team }),
@@ -195,7 +194,6 @@ func browserDocument(t *testing.T) string {
 	out.WriteString(`</section><section class="preview-card"><h2>Constrained allocation</h2>`)
 	compact := browserOptions("compact")
 	compact.PageSize = 10
-	compact.PageSizes = nil
 	compact.Columns = compact.Columns[:3]
 	if err := Table(compact, rows[:10]).Render(context.Background(), &out); err != nil {
 		t.Fatal(err)
@@ -542,7 +540,7 @@ func TestBrowserInteractionsPreserveRowsURLAndGridIsolation(t *testing.T) {
 		Page    int      `json:"page"`
 		URL     string   `json:"url"`
 	}
-	state := State{Filters: map[string][]string{"team": {"Research"}}, Page: 99, RowsPerPage: 5}
+	state := State{Filters: map[string][]string{"team": {"Research"}}, Page: 99}
 	stateJSON, _ := json.Marshal(state)
 	expression := `(() => { const grid = document.querySelector('#people'); grid.setState(` + string(stateJSON) + `); return {
 		visible: [...grid.querySelectorAll('tr[data-dg-row]:not([hidden])')].map(r => r.dataset.dgRowId),
@@ -604,7 +602,7 @@ func TestBrowserInteractionsPreserveRowsURLAndGridIsolation(t *testing.T) {
 		cell.querySelector('.person-name').textContent = 'Newcomer';
 		grid.querySelector('.datagrid-table-wrap tbody').append(row);
 		grid.refresh();
-		grid.setState({search:'newcomer', page:1, rowsPerPage:5}, {updateURL:false});
+		grid.setState({search:'newcomer', page:1}, {updateURL:false});
 		return [...grid.querySelectorAll('tr[data-dg-row]:not([hidden])')].map(r => r.dataset.dgRowId);
 	})()`, &dynamic)); err != nil {
 		t.Fatal(err)
@@ -934,30 +932,8 @@ func TestBrowserGeneratedControlsHooksAndPopstate(t *testing.T) {
 	})()`, &cleared)); err != nil {
 		t.Fatal(err)
 	}
-	if !statesEqual(cleared, State{Filters: map[string][]string{}, Page: 1, RowsPerPage: 5}) {
+	if !statesEqual(cleared, State{Filters: map[string][]string{}, Page: 1}) {
 		t.Fatalf("clear control state = %#v", cleared)
-	}
-
-	var resized struct {
-		RowsPerPage int      `json:"rowsPerPage"`
-		Visible     []string `json:"visible"`
-		URL         string   `json:"url"`
-	}
-	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
-		const grid = document.querySelector('#people');
-		const select = grid.querySelector('[data-dg-role="page-size"]');
-		select.value = '10';
-		select.dispatchEvent(new Event('change', {bubbles:true}));
-		return {
-			rowsPerPage: grid.getState().rowsPerPage,
-			visible: [...grid.querySelectorAll('tr[data-dg-row]:not([hidden])')].map(row => row.dataset.dgRowId),
-			url: location.href,
-		};
-	})()`, &resized)); err != nil {
-		t.Fatal(err)
-	}
-	if resized.RowsPerPage != 10 || len(resized.Visible) != 10 || !strings.Contains(resized.URL, "dg.people.per-page=10") {
-		t.Fatalf("page-size interaction = %#v", resized)
 	}
 
 	var pager struct {
@@ -998,13 +974,13 @@ func TestBrowserGeneratedControlsHooksAndPopstate(t *testing.T) {
 		});
 		grid.dataset.dgHooks = 'test-hooks';
 		grid.refresh();
-		grid.setState({search:'hook-only', page:1, rowsPerPage:5}, {updateURL:false});
+		grid.setState({search:'hook-only', page:1}, {updateURL:false});
 		const search = [...grid.querySelectorAll('tr[data-dg-row]:not([hidden])')].map(row => row.dataset.dgRowId);
-		grid.setState({filters:{team:['Research']}, page:1, rowsPerPage:5}, {updateURL:false});
+		grid.setState({filters:{team:['Research']}, page:1}, {updateURL:false});
 		const filter = [...grid.querySelectorAll('tr[data-dg-row]:not([hidden])')].map(row => row.dataset.dgRowId);
-		grid.setState({sort:'name', page:1, rowsPerPage:5}, {updateURL:false});
+		grid.setState({sort:'name', page:1}, {updateURL:false});
 		const compare = [...grid.querySelectorAll('tr[data-dg-row]:not([hidden])')].map(row => row.dataset.dgRowId);
-		grid.setState({filters:{team:['😀','\uE000','😀']}, page:1, rowsPerPage:5}, {updateURL:false});
+		grid.setState({filters:{team:['😀','\uE000','😀']}, page:1}, {updateURL:false});
 		const unicode = grid.getState().filters.team;
 		return {search, filter, compare, unicode};
 	})()`, &hooked)); err != nil {
@@ -1054,16 +1030,16 @@ func TestBrowserGeneratedControlsHooksAndPopstate(t *testing.T) {
 	}
 	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
 		const grid = document.querySelector('#people');
-		grid.setState({page:1, rowsPerPage:5}, {updateURL:false});
+		grid.setState({page:1}, {updateURL:false});
 		grid.querySelector('[data-dg-row-id="person-00"] [data-dg-column="score"]')
 			.setAttribute('data-dg-sort-value', '');
 		grid.querySelector('[data-dg-row-id="person-01"] [data-dg-column="score"]')
 			.setAttribute('data-dg-sort-value', 'not-a-number');
 		grid.refresh();
-		grid.setState({sort:'score', page:1, rowsPerPage:5}, {updateURL:false});
+		grid.setState({sort:'score', page:1}, {updateURL:false});
 		const ascending = [...grid.querySelectorAll('tr[data-dg-row]')]
 			.slice(-2).map(row => row.dataset.dgRowId);
-		grid.setState({sort:'score', descending:true, page:1, rowsPerPage:5}, {updateURL:false});
+		grid.setState({sort:'score', descending:true, page:1}, {updateURL:false});
 		const descending = [...grid.querySelectorAll('tr[data-dg-row]')]
 			.slice(-2).map(row => row.dataset.dgRowId);
 		return {ascending, descending};
@@ -1149,8 +1125,7 @@ func TestBrowserHandwrittenMetadataDefaultsAndNoHookHotPath(t *testing.T) {
 				grid.dataset.dgFeatures = 'search filters query';
 				grid.dataset.dgQueryPrefix = 'dg.' + id;
 				grid.dataset.dgPageSize = '5';
-				grid.dataset.dgPageSizes = '[5,10]';
-				grid.dataset.dgInitialState = '{"page":1,"rowsPerPage":5}';
+				grid.dataset.dgInitialState = '{"page":1}';
 
 				const search = document.createElement('input');
 				search.dataset.dgRole = 'search';
@@ -1217,7 +1192,6 @@ func TestBrowserHandwrittenMetadataDefaultsAndNoHookHotPath(t *testing.T) {
 		FifteenTypeahead  bool `json:"fifteenTypeahead"`
 		SixteenTypeahead  bool `json:"sixteenTypeahead"`
 		Page              int  `json:"page"`
-		RowsPerPage       int  `json:"rowsPerPage"`
 		OwnsQueryState    bool `json:"ownsQueryState"`
 		NormalizeCalls    int  `json:"normalizeCalls"`
 		HookContextBuilds int  `json:"hookContextBuilds"`
@@ -1243,7 +1217,7 @@ func TestBrowserHandwrittenMetadataDefaultsAndNoHookHotPath(t *testing.T) {
 		const textPanelNoJS = getComputedStyle(textPanel).display !== 'none';
 		textGrid.setAttribute('data-dg-ready', '');
 
-		grid.setState({page:3, rowsPerPage:10}, {emit:false});
+		grid.setState({page:3}, {emit:false});
 		const normalized = grid.getState();
 		const ownsQueryState = [...new URL(location.href).searchParams.keys()]
 			.some(key => key.startsWith('dg.manual-15.'));
@@ -1261,7 +1235,7 @@ func TestBrowserHandwrittenMetadataDefaultsAndNoHookHotPath(t *testing.T) {
 			return originalFromEntries.apply(this, args);
 		};
 		try {
-			grid.setState({search:'value 1', page:4, rowsPerPage:10}, {updateURL:false, emit:false});
+			grid.setState({search:'value 1', page:4}, {updateURL:false, emit:false});
 		} finally {
 			String.prototype.normalize = originalNormalize;
 			Object.fromEntries = originalFromEntries;
@@ -1272,7 +1246,6 @@ func TestBrowserHandwrittenMetadataDefaultsAndNoHookHotPath(t *testing.T) {
 			fifteenTypeahead,
 			sixteenTypeahead,
 			page: normalized.page,
-			rowsPerPage: normalized.rowsPerPage,
 			ownsQueryState,
 			normalizeCalls,
 			hookContextBuilds,
@@ -1286,7 +1259,7 @@ func TestBrowserHandwrittenMetadataDefaultsAndNoHookHotPath(t *testing.T) {
 	if got.NullOptions != 15 || got.FifteenTypeahead || !got.SixteenTypeahead {
 		t.Fatalf("handwritten filter metadata/default threshold = %#v", got)
 	}
-	if got.Page != 1 || got.RowsPerPage != 5 || got.OwnsQueryState {
+	if got.Page != 1 || got.OwnsQueryState {
 		t.Fatalf("disabled pagination state/query normalization = %#v", got)
 	}
 	if got.NormalizeCalls != 1 || got.HookContextBuilds != 0 {
@@ -1310,10 +1283,9 @@ func TestBrowserPipelineMatchesReferenceProperties(t *testing.T) {
 
 	rapid.Check(t, func(t *rapid.T) {
 		state := State{
-			Search:      rapid.SampledFrom([]string{"", "research", "navy", "types", "person", "london"}).Draw(t, "search"),
-			Page:        rapid.IntRange(-2, 8).Draw(t, "page"),
-			RowsPerPage: rapid.SampledFrom([]int{5, 10}).Draw(t, "page-size"),
-			Filters:     make(map[string][]string),
+			Search:  rapid.SampledFrom([]string{"", "research", "navy", "types", "person", "london"}).Draw(t, "search"),
+			Page:    rapid.IntRange(-2, 8).Draw(t, "page"),
+			Filters: make(map[string][]string),
 		}
 		if rapid.Bool().Draw(t, "sort-enabled") {
 			state.Sort = rapid.SampledFrom([]string{"name", "score", "joined", "active"}).Draw(t, "sort")
@@ -1409,10 +1381,8 @@ func referencePage(source []browserPerson, state State) ([]string, int) {
 			return order
 		})
 	}
-	pageSize := state.RowsPerPage
-	if pageSize != 5 && pageSize != 10 {
-		pageSize = 5
-	}
+	// The reference grid renders with a fixed PageSize of 5.
+	const pageSize = 5
 	pages := max(1, (len(rows)+pageSize-1)/pageSize)
 	page := min(max(state.Page, 1), pages)
 	start := min((page-1)*pageSize, len(rows))

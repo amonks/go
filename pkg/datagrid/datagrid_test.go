@@ -88,13 +88,11 @@ func TestTableRendersSemanticRowsAndBehaviorMetadata(t *testing.T) {
 		Caption:           "Computing pioneers",
 		Columns:           columns,
 		PageSize:          2,
-		PageSizes:         []int{2, 4},
 		FilterTypeaheadAt: 8,
 		InitialState: State{
-			Sort:        "joined",
-			Descending:  true,
-			Page:        1,
-			RowsPerPage: 2,
+			Sort:       "joined",
+			Descending: true,
+			Page:       1,
 		},
 		RowID: func(person testPerson) string { return person.ID },
 	}
@@ -104,7 +102,6 @@ func TestTableRendersSemanticRowsAndBehaviorMetadata(t *testing.T) {
 		`<monks-datagrid id="people"`,
 		`data-dg-query-prefix="dg.people"`,
 		`data-dg-page-size="2"`,
-		`data-dg-page-sizes="[2,4]"`,
 		`data-dg-typeahead-at="8"`,
 		`<table`,
 		`<caption>Computing pioneers</caption>`,
@@ -127,6 +124,12 @@ func TestTableRendersSemanticRowsAndBehaviorMetadata(t *testing.T) {
 	}
 	if strings.Contains(got, "Ada <Lovelace>") {
 		t.Fatal("custom cell text was not escaped")
+	}
+	// Rows-per-page is fixed by the caller's PageSize; no chooser exists.
+	for _, absent := range []string{`data-dg-role="page-size"`, "Rows per page", "data-dg-page-sizes"} {
+		if strings.Contains(got, absent) {
+			t.Errorf("rendered table should not contain the retired rows picker %q", absent)
+		}
 	}
 }
 
@@ -163,7 +166,6 @@ func TestShellAppliesUsefulDefaultsForCallerOwnedTables(t *testing.T) {
 		`aria-label="Data table"`,
 		`data-dg-query-prefix="dg.remote"`,
 		`data-dg-page-size="25"`,
-		`data-dg-page-sizes="[25]"`,
 		`data-dg-typeahead-at="16"`,
 		`placeholder="Search rows…"`,
 		`No rows match the current search and filters.`,

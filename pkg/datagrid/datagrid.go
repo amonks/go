@@ -117,8 +117,9 @@ type Options[T any] struct {
 
 	SearchPlaceholder string
 	EmptyText         string
+	// PageSize is the fixed rows-per-page count, 25 by default. Rows-per-page
+	// is a caller decision made here, not user-adjustable state.
 	PageSize          int
-	PageSizes         []int
 	FilterTypeaheadAt int
 	InitialState      State
 	Disabled          Feature
@@ -155,7 +156,6 @@ type ShellProps struct {
 	SearchPlaceholder string
 	EmptyText         string
 	PageSize          int
-	PageSizes         []int
 	FilterTypeaheadAt int
 	InitialState      State
 	Disabled          Feature
@@ -219,8 +219,6 @@ type ControlProps struct {
 	GridID            string
 	SearchPlaceholder string
 	InitialRows       int
-	PageSize          int
-	PageSizes         []int
 	EmptyText         string
 	Empty             templ.Component
 }
@@ -239,7 +237,6 @@ type rowView struct {
 
 type tableSettings struct {
 	pageSize    int
-	pageSizes   []int
 	typeaheadAt int
 	queryPrefix string
 	initial     State
@@ -285,7 +282,6 @@ func makeTableView[T any](opts Options[T], rows []T, extra templ.Component) (tab
 			SearchPlaceholder: searchPlaceholder,
 			EmptyText:         emptyText,
 			PageSize:          settings.pageSize,
-			PageSizes:         settings.pageSizes,
 			FilterTypeaheadAt: settings.typeaheadAt,
 			InitialState:      settings.initial,
 			Disabled:          opts.Disabled,
@@ -395,8 +391,8 @@ func resolvedColumnAlign(align string, sortKind SortKind) string {
 }
 
 // QueryCodecForOptions returns the server-side query codec that exactly
-// matches Table's namespace, page sizes, initial state, disabled features,
-// and sortable/filterable column schema.
+// matches Table's namespace, initial state, disabled features, and
+// sortable/filterable column schema.
 func QueryCodecForOptions[T any](opts Options[T]) (QueryCodec, error) {
 	settings, err := settingsForOptions(opts)
 	if err != nil {
@@ -414,7 +410,6 @@ func settingsForOptions[T any](opts Options[T]) (tableSettings, error) {
 	if pageSize == 0 {
 		pageSize = 25
 	}
-	pageSizes := normalizePageSizes(pageSize, opts.PageSizes)
 	typeaheadAt := opts.FilterTypeaheadAt
 	if typeaheadAt == 0 {
 		typeaheadAt = 16
@@ -440,14 +435,12 @@ func settingsForOptions[T any](opts Options[T]) (tableSettings, error) {
 		Columns:           allColumns,
 		SortableColumns:   sortableColumns,
 		FilterableColumns: filterableColumns,
-		PageSizes:         pageSizes,
 		Disabled:          opts.Disabled,
 	}
 	initial := codec.Normalize(opts.InitialState)
 	codec.Defaults = initial
 	return tableSettings{
 		pageSize:    pageSize,
-		pageSizes:   pageSizes,
 		typeaheadAt: typeaheadAt,
 		queryPrefix: queryPrefix,
 		initial:     initial,
@@ -508,11 +501,6 @@ func validateOptions[T any](opts Options[T]) error {
 			return fmt.Errorf("column %q has unsupported Align %q", column.Key, column.Align)
 		}
 	}
-	for _, pageSize := range opts.PageSizes {
-		if pageSize <= 0 || uint64(pageSize) > maxJavaScriptInteger {
-			return fmt.Errorf("PageSizes contains %d", pageSize)
-		}
-	}
 	if opts.Disabled&FeatureSearch != 0 && opts.InitialState.Search != "" {
 		return fmt.Errorf("initial search requires search to be enabled")
 	}
@@ -552,22 +540,6 @@ func validHookNames(value string) bool {
 	return true
 }
 
-func normalizePageSizes(pageSize int, configured []int) []int {
-	if len(configured) == 0 {
-		return []int{pageSize}
-	}
-	result := make([]int, 0, len(configured)+1)
-	if !slices.Contains(configured, pageSize) {
-		result = append(result, pageSize)
-	}
-	for _, value := range configured {
-		if !slices.Contains(result, value) {
-			result = append(result, value)
-		}
-	}
-	return result
-}
-
 func columnKeys[T any](columns []Column[T]) []string {
 	keys := make([]string, len(columns))
 	for i, column := range columns {
@@ -598,11 +570,6 @@ func featuresAttribute(disabled Feature) string {
 
 func stateJSON(state State) string {
 	data, _ := json.Marshal(state)
-	return string(data)
-}
-
-func intsJSON(values []int) string {
-	data, _ := json.Marshal(values)
 	return string(data)
 }
 
@@ -650,13 +617,6 @@ func normalizeShellProps(props ShellProps) ShellProps {
 	if props.PageSize <= 0 || uint64(props.PageSize) > maxJavaScriptInteger {
 		props.PageSize = 25
 	}
-	validPageSizes := make([]int, 0, len(props.PageSizes))
-	for _, size := range props.PageSizes {
-		if size > 0 && uint64(size) <= maxJavaScriptInteger {
-			validPageSizes = append(validPageSizes, size)
-		}
-	}
-	props.PageSizes = normalizePageSizes(props.PageSize, validPageSizes)
 	if props.FilterTypeaheadAt <= 0 || uint64(props.FilterTypeaheadAt) > maxJavaScriptInteger {
 		props.FilterTypeaheadAt = 16
 	}
@@ -664,9 +624,8 @@ func normalizeShellProps(props ShellProps) ShellProps {
 		props.QueryPrefix = "dg." + props.ID
 	}
 	props.InitialState = (QueryCodec{
-		Prefix:    props.QueryPrefix,
-		PageSizes: props.PageSizes,
-		Disabled:  props.Disabled,
+		Prefix:   props.QueryPrefix,
+		Disabled: props.Disabled,
 	}).Normalize(props.InitialState)
 	return props
 }

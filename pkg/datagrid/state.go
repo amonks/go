@@ -13,12 +13,11 @@ const maxJavaScriptInteger uint64 = 1<<53 - 1
 // State is the shareable state of one grid. Page numbers are one-based.
 // Filters are ORed within a column and ANDed between columns.
 type State struct {
-	Search      string              `json:"search,omitempty"`
-	Filters     map[string][]string `json:"filters,omitempty"`
-	Sort        string              `json:"sort,omitempty"`
-	Descending  bool                `json:"descending,omitempty"`
-	Page        int                 `json:"page,omitempty"`
-	RowsPerPage int                 `json:"rowsPerPage,omitempty"`
+	Search     string              `json:"search,omitempty"`
+	Filters    map[string][]string `json:"filters,omitempty"`
+	Sort       string              `json:"sort,omitempty"`
+	Descending bool                `json:"descending,omitempty"`
+	Page       int                 `json:"page,omitempty"`
 }
 
 // QueryCodec reads and writes a grid's state without disturbing any other
@@ -28,26 +27,20 @@ type State struct {
 // Columns restricts both sort and filter keys. SortableColumns and
 // FilterableColumns override that shared list for their respective roles; a
 // nonnil empty role list disables that role. A nil Columns slice accepts any
-// syntactically valid column key. PageSizes restricts RowsPerPage when it is
-// nonempty. Disabled mirrors feature normalization in the browser.
+// syntactically valid column key. Disabled mirrors feature normalization in
+// the browser.
 type QueryCodec struct {
 	Prefix            string
 	Defaults          State
 	Columns           []string
 	SortableColumns   []string
 	FilterableColumns []string
-	PageSizes         []int
 	Disabled          Feature
 }
 
 // Normalize returns the canonical, schema-valid form of state.
 func (c QueryCodec) Normalize(state State) State {
-	defaults := c.normalize(c.Defaults, 0)
-	result := c.normalize(state, defaults.RowsPerPage)
-	if c.Disabled&FeaturePagination != 0 {
-		result.RowsPerPage = defaults.RowsPerPage
-	}
-	return result
+	return c.normalize(state)
 }
 
 // Decode parses the state owned by this codec. If the query contains no
@@ -60,18 +53,14 @@ func (c QueryCodec) Decode(query url.Values) State {
 	}
 
 	state := State{
-		Page:        1,
-		RowsPerPage: defaults.RowsPerPage,
-		Filters:     make(map[string][]string),
+		Page:    1,
+		Filters: make(map[string][]string),
 	}
 	state.Search = query.Get(c.key("search"))
 	state.Sort = query.Get(c.key("sort"))
 	state.Descending = query.Get(c.key("dir")) == "desc"
 	if page, err := strconv.Atoi(query.Get(c.key("page"))); err == nil {
 		state.Page = page
-	}
-	if pageSize, err := strconv.Atoi(query.Get(c.key("per-page"))); err == nil {
-		state.RowsPerPage = pageSize
 	}
 
 	filterPrefix := c.key("filter.")
@@ -127,9 +116,6 @@ func (c QueryCodec) Encode(query url.Values, state State) {
 	if c.Disabled&FeaturePagination == 0 && state.Page > 1 {
 		query.Set(c.key("page"), strconv.Itoa(state.Page))
 	}
-	if c.Disabled&FeaturePagination == 0 && state.RowsPerPage > 0 && state.RowsPerPage != defaults.RowsPerPage {
-		query.Set(c.key("per-page"), strconv.Itoa(state.RowsPerPage))
-	}
 	columns := make([]string, 0, len(state.Filters))
 	for column := range state.Filters {
 		columns = append(columns, column)
@@ -140,32 +126,19 @@ func (c QueryCodec) Encode(query url.Values, state State) {
 	}
 }
 
-func (c QueryCodec) normalize(state State, fallbackPageSize int) State {
+func (c QueryCodec) normalize(state State) State {
 	result := State{
-		Search:      state.Search,
-		Sort:        state.Sort,
-		Descending:  state.Descending,
-		Page:        state.Page,
-		RowsPerPage: state.RowsPerPage,
-		Filters:     make(map[string][]string),
+		Search:     state.Search,
+		Sort:       state.Sort,
+		Descending: state.Descending,
+		Page:       state.Page,
+		Filters:    make(map[string][]string),
 	}
 	if c.Disabled&FeatureSearch != 0 {
 		result.Search = ""
 	}
 	if c.Disabled&FeaturePagination != 0 || result.Page < 1 || uint64(result.Page) > maxJavaScriptInteger {
 		result.Page = 1
-	}
-	if result.RowsPerPage <= 0 || uint64(result.RowsPerPage) > maxJavaScriptInteger || !c.validPageSize(result.RowsPerPage) {
-		result.RowsPerPage = fallbackPageSize
-		if result.RowsPerPage <= 0 || !c.validPageSize(result.RowsPerPage) {
-			result.RowsPerPage = 0
-			for _, pageSize := range c.PageSizes {
-				if c.validPageSize(pageSize) {
-					result.RowsPerPage = pageSize
-					break
-				}
-			}
-		}
 	}
 	if c.Disabled&FeatureSort != 0 || result.Sort == "" || !c.validSortColumn(result.Sort) {
 		result.Sort = ""
@@ -197,7 +170,7 @@ func (c QueryCodec) hasState(query url.Values) bool {
 		suffixes = append(suffixes, "sort", "dir")
 	}
 	if c.Disabled&FeaturePagination == 0 {
-		suffixes = append(suffixes, "page", "per-page")
+		suffixes = append(suffixes, "page")
 	}
 	for _, suffix := range suffixes {
 		if _, ok := query[c.key(suffix)]; ok {
@@ -231,10 +204,6 @@ func (c QueryCodec) validColumnForRole(column string, role []string) bool {
 	return c.Columns == nil || slices.Contains(c.Columns, column)
 }
 
-func (c QueryCodec) validPageSize(pageSize int) bool {
-	return pageSize > 0 && uint64(pageSize) <= maxJavaScriptInteger && (len(c.PageSizes) == 0 || slices.Contains(c.PageSizes, pageSize))
-}
-
 func (c QueryCodec) key(suffix string) string {
 	return c.Prefix + "." + suffix
 }
@@ -253,6 +222,5 @@ func statesEqual(a, b State) bool {
 		a.Sort == b.Sort &&
 		a.Descending == b.Descending &&
 		a.Page == b.Page &&
-		a.RowsPerPage == b.RowsPerPage &&
 		maps.EqualFunc(a.Filters, b.Filters, slices.Equal)
 }
