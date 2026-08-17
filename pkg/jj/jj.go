@@ -130,7 +130,12 @@ func (c *Client) CurrentCommitID(workspacePath string) (string, error) {
 
 // CurrentChangeEmpty reports whether the current change has no diff.
 func (c *Client) CurrentChangeEmpty(workspacePath string) (bool, error) {
-	output, err := logFieldAt(workspacePath, "@", "empty")
+	return c.ChangeEmptyAt(workspacePath, "@")
+}
+
+// ChangeEmptyAt reports whether the change at the given revision has no diff.
+func (c *Client) ChangeEmptyAt(workspacePath, rev string) (bool, error) {
+	output, err := logFieldAt(workspacePath, rev, "empty")
 	if err != nil {
 		return false, err
 	}
@@ -264,6 +269,14 @@ func (c *Client) Describe(workspacePath, message string) error {
 	return runCombinedOutput(cmd, "jj describe")
 }
 
+// DescribeAt sets the description for the given revision.
+func (c *Client) DescribeAt(workspacePath, rev, message string) error {
+	cmd := exec.Command("jj", "describe", "-r", rev, "--stdin")
+	cmd.Dir = workspacePath
+	cmd.Stdin = strings.NewReader(message)
+	return runCombinedOutput(cmd, "jj describe")
+}
+
 // Commit commits the current change and leaves a new empty change.
 func (c *Client) Commit(workspacePath, message string) error {
 	if err := c.Describe(workspacePath, message); err != nil {
@@ -357,6 +370,20 @@ func (c *Client) Squash(workspacePath string) error {
 		"EDITOR=true",
 		"VISUAL=true",
 	)
+	return runCombinedOutput(cmd, "jj squash")
+}
+
+// SquashInto moves the changes to the given paths from one revision
+// into another, keeping the destination's description. The revisions
+// may be any ancestor/descendant pair; commits between them are
+// rewritten in place, and a source emptied by the move is abandoned.
+func (c *Client) SquashInto(workspacePath, from, into string, paths []string) error {
+	if len(paths) == 0 {
+		return fmt.Errorf("jj squash: at least one path is required")
+	}
+	args := append([]string{"squash", "--from", from, "--into", into, "--use-destination-message"}, paths...)
+	cmd := exec.Command("jj", args...)
+	cmd.Dir = workspacePath
 	return runCombinedOutput(cmd, "jj squash")
 }
 
