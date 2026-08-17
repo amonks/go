@@ -253,6 +253,17 @@ monks-datagrid .datagrid-filter:has(> .datagrid-filter-search) > .datagrid-filte
   padding-block-start: 3.45rem;
 }
 
+/* container-type's layout containment makes every grid a stacking
+   context, so a dropdown's z-index cannot reach a later sibling grid,
+   which would otherwise paint its whole subtree over the open popover.
+   Raise the grid itself for as long as one of its dropdowns is open.
+   (In the narrow layout an open filter expands in flow instead, and the
+   raise is inert.) */
+monks-datagrid:has(.datagrid-filter[open]) {
+  position: relative;
+  z-index: 30;
+}
+
 monks-datagrid .datagrid-filter-search {
   position: absolute;
   z-index: 21;

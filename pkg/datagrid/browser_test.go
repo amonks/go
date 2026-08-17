@@ -429,6 +429,81 @@ func TestBrowserClosedFilterPopoversStayOutOfNarrowLayout(t *testing.T) {
 	}
 }
 
+// TestBrowserOpenFilterDropdownPaintsOverFollowingGrid stacks two grids
+// vertically, like cc's reviews page, and opens the first grid's lowest
+// filter so its dropdown reaches into the second grid. Each grid is its
+// own stacking context (container-type's layout containment), so
+// without an escape hatch the second grid — later in DOM order — paints
+// its filter panel over the first grid's open dropdown.
+func TestBrowserOpenFilterDropdownPaintsOverFollowingGrid(t *testing.T) {
+	rows := browserRows()
+	var out strings.Builder
+	out.WriteString(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>stacked grids</title>`)
+	if err := Head().Render(context.Background(), &out); err != nil {
+		t.Fatal(err)
+	}
+	out.WriteString(`<style>body { margin:0; padding:24px; max-width:920px; }</style></head><body>`)
+	if err := Table(browserOptions("upper"), rows).Render(context.Background(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if err := Table(browserOptions("lower"), rows).Render(context.Background(), &out); err != nil {
+		t.Fatal(err)
+	}
+	out.WriteString(`</body></html>`)
+	html := out.String()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(html))
+	}))
+	defer server.Close()
+
+	ctx := newBrowser(t)
+	if err := chromedp.Run(ctx,
+		chromedp.EmulateViewport(1440, 1000),
+		chromedp.Navigate(server.URL+"/"),
+		chromedp.Poll(`document.querySelectorAll("monks-datagrid[data-dg-ready]").length === 2`, nil,
+			chromedp.WithPollingTimeout(10*time.Second)),
+	); err != nil {
+		t.Fatalf("open stacked-grids fixture: %v", err)
+	}
+
+	var got struct {
+		Overlap       bool   `json:"overlap"`
+		HitInDropdown bool   `json:"hitInDropdown"`
+		Hit           string `json:"hit"`
+	}
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
+		const upper = document.querySelector('#upper');
+		const lower = document.querySelector('#lower');
+		const filters = upper.querySelectorAll('details.datagrid-filter');
+		const filter = filters[filters.length - 1];
+		filter.open = true;
+		const dropdown = filter.querySelector('.datagrid-filter-options').getBoundingClientRect();
+		const target = lower.getBoundingClientRect();
+		const left = Math.max(dropdown.left, target.left);
+		const right = Math.min(dropdown.right, target.right);
+		const top = Math.max(dropdown.top, target.top);
+		const bottom = Math.min(dropdown.bottom, target.bottom);
+		if (right <= left || bottom <= top) {
+			return { overlap: false };
+		}
+		const hit = document.elementFromPoint((left + right) / 2, (top + bottom) / 2);
+		return {
+			overlap: true,
+			hitInDropdown: filter.contains(hit),
+			hit: hit ? (hit.className || hit.tagName) : "none",
+		};
+	})()`, &got)); err != nil {
+		t.Fatal(err)
+	}
+	if !got.Overlap {
+		t.Fatal("fixture bug: the open dropdown never reached the second grid, so the paint order went unexercised")
+	}
+	if !got.HitInDropdown {
+		t.Fatalf("second grid paints over the first grid's open filter dropdown (hit %q)", got.Hit)
+	}
+}
+
 func TestBrowserInteractionsPreserveRowsURLAndGridIsolation(t *testing.T) {
 	server := browserServer(t)
 	defer server.Close()
