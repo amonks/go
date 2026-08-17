@@ -14,7 +14,7 @@ var interestingValues = []string{
 	"quote\"apostrophe'", "<script>&", "line\nbreak", "emoji 🐙",
 }
 
-func drawState(t *rapid.T, label string, columns []string, pageSizes []int) State {
+func drawState(t *rapid.T, label string, columns []string) State {
 	state := State{
 		Search: rapid.SampledFrom(interestingValues).Draw(t, label+"-search"),
 		Page:   rapid.IntRange(-3, 30).Draw(t, label+"-page"),
@@ -22,9 +22,6 @@ func drawState(t *rapid.T, label string, columns []string, pageSizes []int) Stat
 	if rapid.Bool().Draw(t, label+"-sort-set") {
 		state.Sort = rapid.SampledFrom(append(slices.Clone(columns), "unknown")).Draw(t, label+"-sort")
 		state.Descending = rapid.Bool().Draw(t, label+"-descending")
-	}
-	if rapid.Bool().Draw(t, label+"-page-size-set") {
-		state.RowsPerPage = rapid.SampledFrom(append(slices.Clone(pageSizes), -1, 0, 999)).Draw(t, label+"-page-size")
 	}
 	state.Filters = make(map[string][]string)
 	filterColumns := append(slices.Clone(columns), "unknown")
@@ -43,22 +40,19 @@ func drawState(t *rapid.T, label string, columns []string, pageSizes []int) Stat
 
 func TestQueryCodecRoundTripsNormalizedState(t *testing.T) {
 	columns := []string{"name", "team", "joined"}
-	pageSizes := []int{10, 25, 50}
 	baseCodec := QueryCodec{
-		Prefix:    "dg.people",
-		Columns:   columns,
-		PageSizes: pageSizes,
+		Prefix:  "dg.people",
+		Columns: columns,
 		Defaults: State{
-			Page:        1,
-			RowsPerPage: 25,
-			Filters:     map[string][]string{"team": {"ops"}},
+			Page:    1,
+			Filters: map[string][]string{"team": {"ops"}},
 		},
 	}
 
 	rapid.Check(t, func(t *rapid.T) {
 		codec := baseCodec
 		codec.Disabled = Feature(rapid.IntRange(0, int(allFeatures)).Draw(t, "disabled"))
-		state := drawState(t, "state", columns, pageSizes)
+		state := drawState(t, "state", columns)
 		query := url.Values{
 			"unrelated":       {"first", "second"},
 			"dg.other.search": {"leave me alone"},
@@ -98,16 +92,15 @@ func TestQueryCodecRoundTripsNormalizedState(t *testing.T) {
 	})
 }
 
-func TestQueryCodecDisabledPaginationUsesDefaultRowsPerPage(t *testing.T) {
+func TestQueryCodecDisabledPaginationClampsPage(t *testing.T) {
 	codec := QueryCodec{
-		Prefix:    "dg.people",
-		PageSizes: []int{10, 25, 50},
-		Defaults:  State{Page: 1, RowsPerPage: 25},
-		Disabled:  FeaturePagination,
+		Prefix:   "dg.people",
+		Defaults: State{Page: 1},
+		Disabled: FeaturePagination,
 	}
-	state := State{Page: 9, RowsPerPage: 50}
+	state := State{Page: 9}
 
-	want := State{Page: 1, RowsPerPage: 25, Filters: map[string][]string{}}
+	want := State{Page: 1, Filters: map[string][]string{}}
 	if got := codec.Normalize(state); !statesEqual(got, want) {
 		t.Fatalf("disabled pagination normalization = %#v, want %#v", got, want)
 	}
@@ -127,12 +120,11 @@ func TestQueryCodecDefaultStateOwnsNoParameters(t *testing.T) {
 		Prefix:  "dg.inventory",
 		Columns: []string{"status"},
 		Defaults: State{
-			Search:      "in stock",
-			Filters:     map[string][]string{"status": {"ready"}},
-			Sort:        "status",
-			Descending:  true,
-			Page:        3,
-			RowsPerPage: 20,
+			Search:     "in stock",
+			Filters:    map[string][]string{"status": {"ready"}},
+			Sort:       "status",
+			Descending: true,
+			Page:       3,
 		},
 	}
 	query := url.Values{
@@ -156,13 +148,12 @@ func TestQueryCodecMarkerRepresentsClearedNonzeroDefaults(t *testing.T) {
 		Prefix:  "dg.people",
 		Columns: []string{"team"},
 		Defaults: State{
-			Search:      "Ada",
-			Filters:     map[string][]string{"team": {"ops"}},
-			Page:        1,
-			RowsPerPage: 25,
+			Search:  "Ada",
+			Filters: map[string][]string{"team": {"ops"}},
+			Page:    1,
 		},
 	}
-	want := State{Page: 1, RowsPerPage: 25}
+	want := State{Page: 1}
 	query := make(url.Values)
 
 	codec.Encode(query, want)
@@ -177,26 +168,23 @@ func TestQueryCodecMarkerRepresentsClearedNonzeroDefaults(t *testing.T) {
 
 func TestQueryCodecRejectsMalformedOwnedValues(t *testing.T) {
 	codec := QueryCodec{
-		Prefix:    "dg.people",
-		Columns:   []string{"name", "team"},
-		PageSizes: []int{10, 25},
-		Defaults:  State{Page: 1, RowsPerPage: 25},
+		Prefix:   "dg.people",
+		Columns:  []string{"name", "team"},
+		Defaults: State{Page: 1},
 	}
 	query := url.Values{
 		"dg.people.state":          {"1"},
 		"dg.people.sort":           {"missing"},
 		"dg.people.dir":            {"sideways"},
 		"dg.people.page":           {"999999999999999999999999"},
-		"dg.people.per-page":       {"11"},
 		"dg.people.filter.missing": {"x"},
 		"dg.people.filter.team":    {"ops", "ops", ""},
 	}
 
 	got := codec.Decode(query)
 	want := State{
-		Filters:     map[string][]string{"team": {"", "ops"}},
-		Page:        1,
-		RowsPerPage: 25,
+		Filters: map[string][]string{"team": {"", "ops"}},
+		Page:    1,
 	}
 	if !statesEqual(got, want) {
 		t.Fatalf("got %#v, want %#v", got, want)
@@ -209,14 +197,12 @@ func TestQueryCodecUsesRoleSpecificColumnsAndStableSyntax(t *testing.T) {
 		Columns:           []string{"name", "team", "score"},
 		SortableColumns:   []string{"name", "score"},
 		FilterableColumns: []string{"team"},
-		PageSizes:         []int{10},
-		Defaults:          State{Page: 1, RowsPerPage: 10},
+		Defaults:          State{Page: 1},
 	}
 	state := State{
-		Sort:        "team",
-		Filters:     map[string][]string{"name": {"Ada"}, "team": {"Research"}, "": {"bad"}},
-		Page:        1,
-		RowsPerPage: 10,
+		Sort:    "team",
+		Filters: map[string][]string{"name": {"Ada"}, "team": {"Research"}, "": {"bad"}},
+		Page:    1,
 	}
 
 	got := codec.Normalize(state)
@@ -232,8 +218,8 @@ func TestQueryCodecUsesRoleSpecificColumnsAndStableSyntax(t *testing.T) {
 }
 
 func TestQueryCodecMatchesJavaScriptSafeIntegerRange(t *testing.T) {
-	codec := QueryCodec{Prefix: "dg.people", PageSizes: []int{25}, Defaults: State{Page: 1, RowsPerPage: 25}}
-	got := codec.Normalize(State{Page: int(maxJavaScriptInteger) + 1, RowsPerPage: 25})
+	codec := QueryCodec{Prefix: "dg.people", Defaults: State{Page: 1}}
+	got := codec.Normalize(State{Page: int(maxJavaScriptInteger) + 1})
 	if got.Page != 1 {
 		t.Fatalf("unsafe page normalized to %d, want 1", got.Page)
 	}
@@ -246,14 +232,12 @@ func TestQueryCodecForOptionsSharesRenderedSchemaAndDefaults(t *testing.T) {
 	score := TextColumn("score", "Score", func(value string) string { return value })
 	score.Disabled = FeatureFilters
 	opts := Options[string]{
-		ID:        "people",
-		Columns:   []Column[string]{name, team, score},
-		PageSize:  10,
-		PageSizes: []int{10, 25},
+		ID:       "people",
+		Columns:  []Column[string]{name, team, score},
+		PageSize: 10,
 		InitialState: State{
-			Sort:        "name",
-			Page:        1,
-			RowsPerPage: 10,
+			Sort: "name",
+			Page: 1,
 		},
 	}
 
@@ -265,10 +249,9 @@ func TestQueryCodecForOptionsSharesRenderedSchemaAndDefaults(t *testing.T) {
 		t.Fatalf("codec defaults = %#v, prefix %q", codec.Defaults, codec.Prefix)
 	}
 	got := codec.Normalize(State{
-		Sort:        "team",
-		Filters:     map[string][]string{"team": {"Research"}, "score": {"10"}},
-		Page:        1,
-		RowsPerPage: 10,
+		Sort:    "team",
+		Filters: map[string][]string{"team": {"Research"}, "score": {"10"}},
+		Page:    1,
 	})
 	if got.Sort != "" || !maps.EqualFunc(got.Filters, map[string][]string{"team": {"Research"}}, slices.Equal) {
 		t.Fatalf("option-derived schema = %#v", got)

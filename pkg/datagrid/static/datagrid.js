@@ -118,7 +118,6 @@
       sort: state?.sort || "",
       descending: Boolean(state?.descending),
       page: state?.page || 1,
-      rowsPerPage: state?.rowsPerPage || 0,
     };
   }
 
@@ -127,8 +126,7 @@
       a.search !== b.search ||
       a.sort !== b.sort ||
       a.descending !== b.descending ||
-      a.page !== b.page ||
-      a.rowsPerPage !== b.rowsPerPage
+      a.page !== b.page
     ) {
       return false;
     }
@@ -310,14 +308,13 @@
         this._state = cloneState(this._defaults);
         this._initialized = true;
       } else {
-        this._state = this._normalizeState(this._state, this._defaults.rowsPerPage);
+        this._state = this._normalizeState(this._state);
       }
       if (readQuery && this._features.has("query")) {
         this._state = this._decodeQuery();
       }
 
       this._collectRows();
-      this._renderPageSizeOptions();
       this._renderFilters();
       this._apply({ writeQuery });
     }
@@ -442,11 +439,7 @@
           : featureAttribute.split(/[\s,]+/u).filter(Boolean),
       );
 
-      const pageSizes = parseJSON(this.getAttribute("data-dg-page-sizes"), []);
-      this._pageSizes = Array.isArray(pageSizes)
-        ? [...new Set(pageSizes.map(positiveInteger).filter(Boolean))]
-        : [];
-      this._attributePageSize = positiveInteger(this.getAttribute("data-dg-page-size"));
+      this._pageSize = positiveInteger(this.getAttribute("data-dg-page-size"));
       this._typeaheadAt = positiveInteger(this.getAttribute("data-dg-typeahead-at")) || 16;
       this._queryPrefix = this.getAttribute("data-dg-query-prefix") ||
         (this.id ? `dg.${this.id}` : "dg.datagrid");
@@ -465,7 +458,6 @@
       this._empty = this._findOwned('[data-dg-role="empty"]');
       this._filterHost = this._findOwned('[data-dg-role="filters"]');
       this._summary = this._findOwned('[data-dg-role="summary"]');
-      this._pageSizeSelect = this._findOwned('[data-dg-role="page-size"]');
       this._pagination = this._findOwned('[data-dg-role="pagination"]');
 
       this._columns = new Map();
@@ -517,12 +509,10 @@
     _readDefaults() {
       const raw = parseJSON(this.getAttribute("data-dg-initial-state"), {});
       const initial = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
-      const fallbackPageSize =
-        this._attributePageSize || this._pageSizes[0] || 0;
-      return this._normalizeState(initial, fallbackPageSize);
+      return this._normalizeState(initial);
     }
 
-    _normalizeState(input, fallbackPageSize) {
+    _normalizeState(input) {
       const candidate = input && typeof input === "object" ? input : {};
       const filters = {};
       if (this._features.has("filters") && candidate.filters && typeof candidate.filters === "object") {
@@ -544,29 +534,6 @@
         ? requestedPage
         : 1;
 
-      let rowsPerPage = positiveInteger(candidate.rowsPerPage);
-      if (rowsPerPage && this._pageSizes.length > 0 && !this._pageSizes.includes(rowsPerPage)) {
-        rowsPerPage = 0;
-      }
-      if (!rowsPerPage) {
-        rowsPerPage = positiveInteger(fallbackPageSize);
-        if (rowsPerPage && this._pageSizes.length > 0 && !this._pageSizes.includes(rowsPerPage)) {
-          rowsPerPage = 0;
-        }
-      }
-      if (!rowsPerPage && this._pageSizes.length > 0) {
-        rowsPerPage = this._pageSizes[0];
-      }
-      if (!this._features.has("pagination")) {
-        rowsPerPage = positiveInteger(fallbackPageSize);
-        if (rowsPerPage && this._pageSizes.length > 0 && !this._pageSizes.includes(rowsPerPage)) {
-          rowsPerPage = 0;
-        }
-        if (!rowsPerPage && this._pageSizes.length > 0) {
-          rowsPerPage = this._pageSizes[0];
-        }
-      }
-
       return {
         search: this._features.has("search") && candidate.search != null
           ? String(candidate.search)
@@ -575,7 +542,6 @@
         sort,
         descending: sort !== "" && Boolean(candidate.descending),
         page: this._features.has("pagination") ? page : 1,
-        rowsPerPage,
       };
     }
 
@@ -680,22 +646,6 @@
 
       const value = String(fallback ?? "");
       return [{ value, label: value === "" ? "(Blank)" : value }];
-    }
-
-    _renderPageSizeOptions() {
-      if (!this._pageSizeSelect) {
-        return;
-      }
-      const usable = this._features.has("pagination") && this._pageSizes.length > 1;
-      this._pageSizeSelect.hidden = !usable;
-      this._pageSizeSelect.disabled = !usable;
-      this._pageSizeSelect.replaceChildren();
-      for (const size of this._pageSizes) {
-        const option = document.createElement("option");
-        option.value = String(size);
-        option.textContent = String(size);
-        this._pageSizeSelect.append(option);
-      }
     }
 
     _renderFilters() {
@@ -830,7 +780,7 @@
     }
 
     _apply({ writeQuery }) {
-      this._state = this._normalizeState(this._state, this._defaults.rowsPerPage);
+      this._state = this._normalizeState(this._state);
       const hooks = this._resolveHooks();
       const hasHooks = hooks.search.length > 0 || hooks.filter.length > 0 || hooks.compare.length > 0;
       this._hookState = hasHooks ? cloneState(this._state) : null;
@@ -867,9 +817,9 @@
           this._matchesSearch(record, searchTokens, hooks.search) &&
           this._matchesFilters(record, "", hooks.filter),
       );
-      const paginated = this._features.has("pagination") && this._state.rowsPerPage > 0;
+      const paginated = this._features.has("pagination") && this._pageSize > 0;
       const totalPages = paginated
-        ? Math.max(1, Math.ceil(matching.length / this._state.rowsPerPage))
+        ? Math.max(1, Math.ceil(matching.length / this._pageSize))
         : 1;
       this._state.page = paginated
         ? Math.min(Math.max(1, this._state.page), totalPages)
@@ -878,9 +828,9 @@
         this._hookState.page = this._state.page;
       }
 
-      const first = paginated ? (this._state.page - 1) * this._state.rowsPerPage : 0;
+      const first = paginated ? (this._state.page - 1) * this._pageSize : 0;
       const visibleRecords = paginated
-        ? matching.slice(first, first + this._state.rowsPerPage)
+        ? matching.slice(first, first + this._pageSize)
         : matching;
       const visible = new Set(visibleRecords.map((record) => record.element));
       for (const record of this._records) {
@@ -1100,13 +1050,6 @@
         );
       }
 
-      if (this._pageSizeSelect) {
-        const value = String(this._state.rowsPerPage);
-        if ([...this._pageSizeSelect.options].some((option) => option.value === value)) {
-          this._pageSizeSelect.value = value;
-        }
-      }
-
       for (const checkbox of this._findAllOwned(
         '.datagrid-generated-filters input[type="checkbox"][data-dg-filter-column]',
       )) {
@@ -1188,7 +1131,7 @@
         ? active?.getAttribute?.("data-dg-page-action") || ""
         : "";
       this._pagination.replaceChildren();
-      const enabled = this._features.has("pagination") && this._state.rowsPerPage > 0;
+      const enabled = this._features.has("pagination") && this._pageSize > 0;
       this._pagination.hidden = !enabled || totalPages <= 1;
       if (!enabled) {
         return;
@@ -1276,7 +1219,7 @@
         this._summary.textContent = total === 0 ? "No rows" : `No matching rows · ${total} total`;
         return;
       }
-      const paginated = this._features.has("pagination") && this._state.rowsPerPage > 0;
+      const paginated = this._features.has("pagination") && this._pageSize > 0;
       const range = paginated
         ? `Showing ${first + 1}–${first + visibleCount} of ${matching}`
         : `${matching}`;
@@ -1298,7 +1241,7 @@
         stateSuffixes.push("sort", "dir");
       }
       if (this._features.has("pagination")) {
-        stateSuffixes.push("page", "per-page");
+        stateSuffixes.push("page");
       }
       let hasState = stateSuffixes
         .some((suffix) => parameters.has(key(suffix)));
@@ -1324,15 +1267,10 @@
         sort: parameters.get(key("sort")) || "",
         descending: parameters.get(key("dir")) === "desc",
         page: 1,
-        rowsPerPage: defaults.rowsPerPage,
       };
       const page = queryInteger(parameters.get(key("page")));
       if (page !== null) {
         state.page = page;
-      }
-      const rowsPerPage = queryInteger(parameters.get(key("per-page")));
-      if (rowsPerPage !== null) {
-        state.rowsPerPage = rowsPerPage;
       }
       const filterPrefix = key("filter.");
       for (const parameterKey of new Set(parameters.keys())) {
@@ -1344,7 +1282,7 @@
           state.filters[column] = parameters.getAll(parameterKey);
         }
       }
-      return this._normalizeState(state, defaults.rowsPerPage);
+      return this._normalizeState(state);
     }
 
     _encodeQuery() {
@@ -1357,8 +1295,8 @@
         url.searchParams.delete(key);
       }
 
-      const state = this._normalizeState(this._state, this._defaults.rowsPerPage);
-      const defaults = this._normalizeState(this._defaults, this._defaults.rowsPerPage);
+      const state = this._normalizeState(this._state);
+      const defaults = this._normalizeState(this._defaults);
       if (!statesEqual(state, defaults)) {
         const key = (suffix) => `${this._queryPrefix}.${suffix}`;
         url.searchParams.set(key("state"), "1");
@@ -1371,13 +1309,6 @@
         }
         if (this._features.has("pagination") && state.page > 1) {
           url.searchParams.set(key("page"), String(state.page));
-        }
-        if (
-          this._features.has("pagination") &&
-          state.rowsPerPage > 0 &&
-          state.rowsPerPage !== defaults.rowsPerPage
-        ) {
-          url.searchParams.set(key("per-page"), String(state.rowsPerPage));
         }
         for (const column of Object.keys(state.filters).sort(compareCanonicalStrings)) {
           for (const value of state.filters[column]) {
@@ -1395,7 +1326,7 @@
 
     _setState(next, { emit, writeQuery, renderUnknowns }) {
       const previous = this.getState();
-      this._state = this._normalizeState(next, this._defaults.rowsPerPage);
+      this._state = this._normalizeState(next);
       if (renderUnknowns && this._hasUnknownSelectedOptions(this._state)) {
         this._renderFilters();
       }
@@ -1455,7 +1386,6 @@
           sort: "",
           descending: false,
           page: 1,
-          rowsPerPage: this._defaults.rowsPerPage,
         }, { emit: true, writeQuery: true, renderUnknowns: false });
         return;
       }
@@ -1480,7 +1410,7 @@
               (record) =>
                 this._matchesSearch(record, searchTokens, hooks.search) &&
                 this._matchesFilters(record, "", hooks.filter),
-            ).length / next.rowsPerPage,
+            ).length / this._pageSize,
           ),
         );
         switch (pageButton.getAttribute("data-dg-page-action")) {
@@ -1522,18 +1452,7 @@
 
     _onChange(event) {
       const target = event.target;
-      if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement) || !this._owns(target)) {
-        return;
-      }
-      if (target.matches('[data-dg-role="page-size"]')) {
-        const size = positiveInteger(target.value);
-        if (!size || (this._pageSizes.length > 0 && !this._pageSizes.includes(size))) {
-          return;
-        }
-        const next = this.getState();
-        next.rowsPerPage = size;
-        next.page = 1;
-        this._setState(next, { emit: true, writeQuery: true, renderUnknowns: false });
+      if (!(target instanceof HTMLInputElement) || !this._owns(target)) {
         return;
       }
       if (target.matches('input[type="checkbox"][data-dg-filter-column]')) {

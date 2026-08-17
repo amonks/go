@@ -30,7 +30,6 @@ templ Shell(props ShellProps) {
 		data-dg-features={ featuresAttribute(props.Disabled) }
 		data-dg-query-prefix={ props.QueryPrefix }
 		data-dg-page-size={ strconv.Itoa(props.PageSize) }
-		data-dg-page-sizes={ intsJSON(props.PageSizes) }
 		data-dg-typeahead-at={ strconv.Itoa(props.FilterTypeaheadAt) }
 		data-dg-initial-state={ stateJSON(props.InitialState) }
 		if props.ClientHooks != "" {
@@ -47,9 +46,6 @@ templ Shell(props ShellProps) {
 			<section class="datagrid-content" aria-label="Table results">
 				<div class="datagrid-statusbar">
 					@ResultSummary(ControlProps{GridID: props.ID, InitialRows: props.InitialRows})
-					if props.Disabled&FeaturePagination == 0 && len(props.PageSizes) > 1 {
-						@PageSizeControl(ControlProps{GridID: props.ID, PageSize: props.PageSize, PageSizes: props.PageSizes})
-					}
 				</div>
 				<div class="datagrid-table-wrap">
 					{ children... }
@@ -122,18 +118,6 @@ templ ResultSummary(props ControlProps) {
 	>
 		{ initialSummary(props.InitialRows) }
 	</p>
-}
-
-// PageSizeControl lets a caller-provided set of page sizes be selected.
-templ PageSizeControl(props ControlProps) {
-	<label class="datagrid-page-size">
-		<span>Rows</span>
-		<select data-dg-role="page-size" aria-label="Rows per page">
-			for _, size := range props.PageSizes {
-				<option value={ strconv.Itoa(size) } selected?={ size == props.PageSize }>{ strconv.Itoa(size) }</option>
-			}
-		</select>
-	</label>
 }
 
 // PaginationControl is populated with the current page window by the element.
