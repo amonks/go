@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -114,22 +115,27 @@ func TestJitterFor(t *testing.T) {
 }
 
 func TestWaitWithJitter_CompletesNormally(t *testing.T) {
-	ctx := context.Background()
-	start := time.Now()
+	synctest.Test(t, func(t *testing.T) {
+		ctx := context.Background()
+		start := time.Now()
 
-	err := waitWithJitter(ctx, 50*time.Millisecond)
-	elapsed := time.Since(start)
+		err := waitWithJitter(ctx, 50*time.Millisecond)
+		elapsed := time.Since(start)
 
-	if err != nil {
-		t.Errorf("waitWithJitter() returned error: %v", err)
-	}
+		if err != nil {
+			t.Errorf("waitWithJitter() returned error: %v", err)
+		}
 
-	// Should wait at least the base duration. A timer never fires early, so
-	// this bound is safe under any amount of load. The upper bound lives in
-	// TestJitterFor, which doesn't depend on the scheduler.
-	if elapsed < 50*time.Millisecond {
-		t.Errorf("waitWithJitter() returned too quickly: %v", elapsed)
-	}
+		// On the bubble's fake clock the elapsed time is exactly the base
+		// duration plus the jitter, so both bounds are exact: at least the
+		// base, at most base + base/4 (the jitter span TestJitterFor covers).
+		if elapsed < 50*time.Millisecond {
+			t.Errorf("waitWithJitter() returned too quickly: %v", elapsed)
+		}
+		if max := 50*time.Millisecond + 50*time.Millisecond/4; elapsed > max {
+			t.Errorf("waitWithJitter() waited %v, want at most %v", elapsed, max)
+		}
+	})
 }
 
 func TestDefaultRetryConfig(t *testing.T) {
