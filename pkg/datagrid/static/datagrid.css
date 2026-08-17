@@ -163,7 +163,6 @@ monks-datagrid .datagrid-filter {
 monks-datagrid .datagrid-filter > summary {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 0.55rem;
   min-block-size: 2.45rem;
   max-inline-size: 14rem;
@@ -209,13 +208,28 @@ monks-datagrid .datagrid-filter.is-active > summary {
   color: var(--datagrid-accent-strong);
 }
 
+/* The column name takes every spare pixel so the selection sits against
+   the chevron: stacked in the side rail, the summaries are all one width,
+   so their selections line up as a column instead of drifting with the
+   length of each name. Ending the text there keeps a long selection's
+   right edge in that column too. */
+monks-datagrid .datagrid-filter-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  min-inline-size: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 monks-datagrid .datagrid-filter-selection {
+  flex: 0 1 auto;
   overflow: hidden;
   min-inline-size: 1.7rem;
   max-inline-size: 7rem;
   color: var(--datagrid-muted);
   font-size: 0.75rem;
   font-weight: 500;
+  text-align: end;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

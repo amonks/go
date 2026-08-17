@@ -707,6 +707,7 @@
         const heading = document.createElement("summary");
         heading.className = "datagrid-filter-heading";
         const headingLabel = document.createElement("span");
+        headingLabel.className = "datagrid-filter-name";
         headingLabel.textContent = column.label;
         const selection = document.createElement("span");
         selection.className = "datagrid-filter-selection";
@@ -1347,12 +1348,57 @@
       this.addEventListener("click", (event) => this._onClick(event), options);
       this.addEventListener("input", (event) => this._onInput(event), options);
       this.addEventListener("change", (event) => this._onChange(event), options);
+      this.addEventListener("keydown", (event) => this._onKeyDown(event), options);
       window.addEventListener("popstate", () => this._onPopState(), options);
+      // An open facet is a menu painted over the page, so a press anywhere
+      // else dismisses it — including in another grid, which listens on the
+      // same document and closes only its own facets.
+      (this.ownerDocument || document).addEventListener(
+        "pointerdown",
+        (event) => this._onDocumentPointerDown(event),
+        options,
+      );
+    }
+
+    _onDocumentPointerDown(event) {
+      const target = event.target instanceof Element ? event.target : null;
+      this._closeFacets(target?.closest("details[data-dg-filter-column]") || null);
+    }
+
+    _onKeyDown(event) {
+      if (event.key !== "Escape" || event.defaultPrevented) {
+        return;
+      }
+      const target = event.target instanceof Element ? event.target : null;
+      const details = target?.closest("details[data-dg-filter-column]");
+      if (!details || !details.open || !this._owns(details)) {
+        return;
+      }
+      details.open = false;
+      details.querySelector("summary")?.focus();
+    }
+
+    // Close every open facet but one. The selector matches only open facets,
+    // so the common press — nothing open — walks an empty list.
+    _closeFacets(except) {
+      for (const details of this._findAllOwned("details[data-dg-filter-column][open]")) {
+        if (details !== except) {
+          details.open = false;
+        }
+      }
     }
 
     _onClick(event) {
       const target = event.target instanceof Element ? event.target : null;
       if (!target || !this._owns(target)) {
+        return;
+      }
+
+      const facetSummary = target.closest("details[data-dg-filter-column] > summary");
+      if (facetSummary) {
+        // Keyboard activation raises no pointer event, so the press that
+        // opens a facet from the keyboard closes the others here instead.
+        this._closeFacets(facetSummary.parentElement);
         return;
       }
 

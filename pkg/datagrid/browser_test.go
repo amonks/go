@@ -26,6 +26,7 @@ import (
 	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
+	"github.com/chromedp/chromedp/kb"
 	"pgregory.net/rapid"
 )
 
@@ -426,6 +427,189 @@ func TestBrowserClosedFilterPopoversStayOutOfNarrowLayout(t *testing.T) {
 	}
 	if got.SearchDisplay != "none" || got.OptionsDisplay != "none" || got.DocumentWidth > got.ViewportWidth {
 		t.Fatalf("closed filter affected narrow layout: %#v", got)
+	}
+}
+
+// TestBrowserOpenFacetDismissal drives an open facet with real pointer
+// and key events: a press inside it — an option, its own summary — is
+// its own business, and anything else on the page dismisses it, whether
+// that is the page around the grid, the table, or another grid.
+func TestBrowserOpenFacetDismissal(t *testing.T) {
+	server := browserServer(t)
+	defer server.Close()
+	ctx := newBrowser(t)
+	navigateReady(t, ctx, server.URL+"/")
+
+	openColumns := `[...document.querySelectorAll('#people details[data-dg-filter-column][open]')]
+		.map((details) => details.dataset.dgFilterColumn)`
+
+	var afterOption struct {
+		Open    []string `json:"open"`
+		Filters []string `json:"filters"`
+	}
+	if err := chromedp.Run(ctx,
+		chromedp.Click(`#people details[data-dg-filter-column="team"] > summary`, chromedp.ByQuery),
+		chromedp.Click(`#people details[data-dg-filter-column="team"] label[data-dg-filter-value="Navy"]`, chromedp.ByQuery),
+		chromedp.Evaluate(`({
+			open: `+openColumns+`,
+			filters: document.querySelector('#people').getState().filters.team || [],
+		})`, &afterOption),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(afterOption.Open, []string{"team"}) || !slices.Equal(afterOption.Filters, []string{"Navy"}) {
+		t.Fatalf("picking an option inside the facet = %#v, want it open with Navy selected", afterOption)
+	}
+
+	var afterOutside []string
+	if err := chromedp.Run(ctx,
+		chromedp.Click(`h1`, chromedp.ByQuery),
+		chromedp.Evaluate(openColumns, &afterOutside),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if len(afterOutside) != 0 {
+		t.Fatalf("facets open after a press outside the grid: %v", afterOutside)
+	}
+
+	// A press in the second grid dismisses the first grid's facet: each
+	// grid listens on the shared document and closes only its own.
+	var afterOtherGrid struct {
+		People  []string `json:"people"`
+		Compact []string `json:"compact"`
+	}
+	if err := chromedp.Run(ctx,
+		chromedp.Click(`#people details[data-dg-filter-column="team"] > summary`, chromedp.ByQuery),
+		chromedp.Click(`#compact details[data-dg-filter-column="city"] > summary`, chromedp.ByQuery),
+		chromedp.Evaluate(`({
+			people: `+openColumns+`,
+			compact: [...document.querySelectorAll('#compact details[data-dg-filter-column][open]')]
+				.map((details) => details.dataset.dgFilterColumn),
+		})`, &afterOtherGrid),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if len(afterOtherGrid.People) != 0 || !slices.Equal(afterOtherGrid.Compact, []string{"city"}) {
+		t.Fatalf("pressing in the second grid = %#v, want the first grid's facet closed and the second's open", afterOtherGrid)
+	}
+
+	// Keyboard activation raises no pointer event, so opening a facet
+	// from the keyboard has to supersede the open one on its own.
+	var afterKeyboardOpen struct {
+		First  []string `json:"first"`
+		Second []string `json:"second"`
+	}
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
+		const grid = document.querySelector('#people');
+		const summary = (column) => grid.querySelector(
+			'details[data-dg-filter-column="' + column + '"] > summary',
+		);
+		summary('name').click();
+		const first = `+openColumns+`;
+		summary('city').click();
+		return {first, second: `+openColumns+`};
+	})()`, &afterKeyboardOpen)); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(afterKeyboardOpen.First, []string{"name"}) || !slices.Equal(afterKeyboardOpen.Second, []string{"city"}) {
+		t.Fatalf("opening facets from the keyboard = %#v, want one open at a time", afterKeyboardOpen)
+	}
+
+	// Escape closes the facet the caret is in and hands focus back to
+	// the control that opened it.
+	var afterEscape struct {
+		Open            []string `json:"open"`
+		FocusedColumn   string   `json:"focusedColumn"`
+		FocusedIsToggle bool     `json:"focusedIsToggle"`
+	}
+	if err := chromedp.Run(ctx,
+		chromedp.Focus(`#people details[data-dg-filter-column="city"] [data-dg-role="filter-search"]`, chromedp.ByQuery),
+		chromedp.KeyEvent(kb.Escape),
+		chromedp.Evaluate(`({
+			open: `+openColumns+`,
+			focusedColumn: document.activeElement?.closest('details[data-dg-filter-column]')?.dataset.dgFilterColumn || '',
+			focusedIsToggle: document.activeElement?.tagName === 'SUMMARY',
+		})`, &afterEscape),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if len(afterEscape.Open) != 0 || afterEscape.FocusedColumn != "city" || !afterEscape.FocusedIsToggle {
+		t.Fatalf("Escape inside the facet = %#v, want it closed with its summary focused", afterEscape)
+	}
+}
+
+// TestBrowserFacetSelectionsShareOneColumn measures the rendered text of
+// each facet's selection, not its box: stacked in the side rail the
+// summaries are one width, so the selections read as a column only if
+// the column name absorbs the spare space and the selection's own text
+// ends against the chevron whatever its length.
+func TestBrowserFacetSelectionsShareOneColumn(t *testing.T) {
+	server := browserServer(t)
+	defer server.Close()
+	ctx := newBrowser(t)
+	navigateReady(t, ctx, server.URL+"/")
+
+	measure := `(() => {
+		const range = document.createRange();
+		return [...document.querySelectorAll('#people details[data-dg-filter-column]')].map((details) => {
+			const selection = details.querySelector('.datagrid-filter-selection');
+			range.selectNodeContents(selection);
+			return {
+				column: details.dataset.dgFilterColumn,
+				text: selection.textContent,
+				right: range.getBoundingClientRect().right,
+			};
+		});
+	})()`
+
+	type edge struct {
+		Column string  `json:"column"`
+		Text   string  `json:"text"`
+		Right  float64 `json:"right"`
+	}
+	spread := func(edges []edge) float64 {
+		var low, high float64
+		for i, e := range edges {
+			if i == 0 || e.Right < low {
+				low = e.Right
+			}
+			if i == 0 || e.Right > high {
+				high = e.Right
+			}
+		}
+		return high - low
+	}
+
+	var unselected []edge
+	if err := chromedp.Run(ctx, chromedp.Evaluate(measure, &unselected)); err != nil {
+		t.Fatal(err)
+	}
+	if len(unselected) < 2 {
+		t.Fatalf("fixture bug: %d facets is not a column", len(unselected))
+	}
+	if got := spread(unselected); got > 0.5 {
+		t.Fatalf("unselected facet selections span %.1fpx of drift: %#v", got, unselected)
+	}
+
+	// A selection wider than "All" still ends in the same column.
+	var mixed []edge
+	if err := chromedp.Run(ctx,
+		chromedp.Click(`#people details[data-dg-filter-column="team"] > summary`, chromedp.ByQuery),
+		chromedp.Click(`#people details[data-dg-filter-column="team"] label[data-dg-filter-value="Research"]`, chromedp.ByQuery),
+		chromedp.Click(`h1`, chromedp.ByQuery),
+		chromedp.Evaluate(measure, &mixed),
+	); err != nil {
+		t.Fatal(err)
+	}
+	labels := make(map[string]string, len(mixed))
+	for _, e := range mixed {
+		labels[e.Column] = e.Text
+	}
+	if labels["team"] != "Research" {
+		t.Fatalf("fixture bug: team selection reads %q, so no facet differs from the rest", labels["team"])
+	}
+	if got := spread(mixed); got > 0.5 {
+		t.Fatalf("a named selection drifts %.1fpx out of the column: %#v", got, mixed)
 	}
 }
 
