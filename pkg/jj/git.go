@@ -41,7 +41,13 @@ func (c *Client) GitFetch(workspacePath string) error {
 
 // GitPush pushes the named bookmark to the remote. It fails if the
 // remote bookmark has moved since the last fetch (jj refuses to push
-// over unexpected remote changes), which callers use to detect races.
+// over unexpected remote changes), which callers use to detect races —
+// but not races with sibling workspaces of the same repo: workspaces
+// share the op log, so a sibling's fetch or push moves the tracked
+// remote position for this workspace too, and a stale push then reads
+// as an accepted sideways move rather than a refusal. Callers who
+// need cross-workspace safety must serialize around the shared repo
+// (see RepoDir); land does.
 //
 // It adapts to jj's bookmark-tracking behavior across versions.
 // Pushing a bookmark new to the remote needs --allow-new on older jj,

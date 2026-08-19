@@ -807,3 +807,43 @@ func TestIsStaleWorkingCopy(t *testing.T) {
 		})
 	}
 }
+
+// RepoDir resolves to the same store from the primary workspace and
+// from a secondary one, which keeps its repo as a pointer file.
+func TestRepoDir_SharedAcrossWorkspaces(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+	client := jj.New()
+	if err := client.Init(tmpDir); err != nil {
+		t.Fatalf("failed to init jj repo: %v", err)
+	}
+	wsPath := filepath.Join(tmpDir, "workspaces", "ws-001")
+	if err := os.MkdirAll(filepath.Dir(wsPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.WorkspaceAdd(tmpDir, "ws-001", wsPath); err != nil {
+		t.Fatalf("failed to add workspace: %v", err)
+	}
+
+	want := filepath.Join(tmpDir, ".jj", "repo")
+	primary, err := client.RepoDir(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if primary != want {
+		t.Errorf("primary: expected %q, got %q", want, primary)
+	}
+	secondary, err := client.RepoDir(wsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secondary != want {
+		t.Errorf("secondary: expected %q, got %q", want, secondary)
+	}
+}
+
+func TestRepoDir_NotARepo(t *testing.T) {
+	if _, err := jj.New().RepoDir(t.TempDir()); err == nil {
+		t.Error("expected error for non-repo directory")
+	}
+}
