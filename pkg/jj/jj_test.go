@@ -1,6 +1,7 @@
 package jj_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -780,5 +781,29 @@ func TestDescribeAt_ClearDescription(t *testing.T) {
 	}
 	if desc != "" {
 		t.Errorf("expected cleared description, got %q", desc)
+	}
+}
+
+func TestIsStaleWorkingCopy(t *testing.T) {
+	stale := errors.New("jj new: exit status 1: Error: The working copy is stale " +
+		"(not updated since operation a83176f80293).\n" +
+		"Hint: Run `jj workspace update-stale` to update it.\n")
+
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"stale working copy", stale, true},
+		{"stale workspace wording", errors.New("Error: The workspace is stale"), true},
+		{"missing revision", errors.New(`Error: Revision "zzz" doesn't exist`), false},
+		{"conflict", errors.New("Error: There are unresolved conflicts at these paths"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := jj.IsStaleWorkingCopy(tc.err); got != tc.want {
+				t.Errorf("IsStaleWorkingCopy(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
 	}
 }
