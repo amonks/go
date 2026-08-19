@@ -288,6 +288,23 @@ func (c *Client) Commit(workspacePath, message string) error {
 	return nil
 }
 
+// IsStaleWorkingCopy reports whether err is jj refusing to work in a
+// workspace whose checked-out change was rewritten by an operation run
+// somewhere else — from the source repo or another workspace — leaving the
+// on-disk copy behind. Recovery is WorkspaceUpdateStale followed by a retry.
+//
+// jj signals it in the message and nowhere else: the exit status is the same
+// 1 every other failure uses, so matching the text is the only way to tell
+// this apart from a bad revision or a conflict.
+func IsStaleWorkingCopy(err error) bool {
+	if err == nil {
+		return false
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "working copy is stale") ||
+		strings.Contains(lower, "workspace is stale")
+}
+
 // WorkspaceUpdateStale updates a stale working copy.
 func (c *Client) WorkspaceUpdateStale(workspacePath string) error {
 	cmd := exec.Command("jj", "workspace", "update-stale")
