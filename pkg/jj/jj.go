@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -429,4 +430,30 @@ func (c *Client) SeriesLog(workspacePath string) (string, error) {
 		return "", nil
 	}
 	return output, nil
+}
+
+// RepoDir returns the repository directory (the .jj/repo store) behind
+// the workspace at workspacePath, following the indirection a
+// secondary workspace keeps in its .jj/repo file. Every workspace of a
+// repo resolves to the same directory, which makes it the place to
+// key anything that must be one-per-repo across workspaces — the op
+// log, and so the view of remote bookmarks, is shared at this level.
+func (c *Client) RepoDir(workspacePath string) (string, error) {
+	repo := filepath.Join(workspacePath, ".jj", "repo")
+	info, err := os.Stat(repo)
+	if err != nil {
+		return "", fmt.Errorf("locating jj repo for %s: %w", workspacePath, err)
+	}
+	if info.IsDir() {
+		return repo, nil
+	}
+	target, err := os.ReadFile(repo)
+	if err != nil {
+		return "", fmt.Errorf("reading %s: %w", repo, err)
+	}
+	path := strings.TrimSpace(string(target))
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(filepath.Dir(repo), path)
+	}
+	return filepath.Clean(path), nil
 }
