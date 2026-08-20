@@ -16,6 +16,9 @@
 
   const tagName = "monks-datagrid";
   const allFeatures = ["search", "sort", "filters", "pagination", "query"];
+  // At or below this many rows the whole table is scannable, so controls
+  // that exist to narrow it — auto facets, the search box — are noise.
+  const scannableRowCount = 5;
   const disabledValues = new Set(["none", "false", "off", "disabled", "0"]);
   const naturalCollator = new Intl.Collator(undefined, {
     numeric: true,
@@ -689,16 +692,16 @@
         }
         const selected = this._state?.filters[column.key] || [];
         // An auto facet that cannot usefully narrow the table is noise:
-        // with five or fewer rows the whole table is scannable, and a
-        // column where no value recurs (for a single-valued column,
-        // cardinality equals the row count) only re-selects individual
-        // rows. An active selection still renders so it stays visible and
-        // removable, and an explicit menu or typeahead column is the
-        // caller's decision either way.
+        // with a scannable table (see scannableRowCount) there is nothing
+        // to narrow, and a column where no value recurs (for a
+        // single-valued column, cardinality equals the row count) only
+        // re-selects individual rows. An active selection still renders
+        // so it stays visible and removable, and an explicit menu or
+        // typeahead column is the caller's decision either way.
         if (
           column.filterMode === "auto" &&
           selected.length === 0 &&
-          (this._records.length <= 5 || !narrows)
+          (this._records.length <= scannableRowCount || !narrows)
         ) {
           continue;
         }
@@ -1033,8 +1036,21 @@
     _syncControls() {
       if (this._searchInput) {
         const enabled = this._features.has("search");
-        this._searchInput.disabled = !enabled;
-        this._searchInput.hidden = !enabled;
+        // A search box over a scannable table is noise for the same
+        // reason an auto facet is (see _renderFilters). Active search
+        // text still renders so it stays visible and removable, and a
+        // focused box is never yanked out from under the user clearing
+        // that text — it hides on the next state change after blur.
+        const useless =
+          this._records.length <= scannableRowCount &&
+          this._state.search === "" &&
+          document.activeElement !== this._searchInput;
+        this._searchInput.disabled = !enabled || useless;
+        this._searchInput.hidden = !enabled || useless;
+        const wrap = this._searchInput.closest(".datagrid-search-wrap");
+        if (wrap) {
+          wrap.hidden = !enabled || useless;
+        }
         if (this._searchInput.value !== this._state.search) {
           this._searchInput.value = this._state.search;
         }

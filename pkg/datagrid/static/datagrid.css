@@ -96,12 +96,12 @@ monks-datagrid .datagrid-panel {
   background: var(--datagrid-panel);
 }
 
-monks-datagrid .datagrid-panel:not(:has(.datagrid-search-wrap, .datagrid-filter, .datagrid-control-override:not(:empty), .datagrid-extra:not(:empty))) {
+monks-datagrid .datagrid-panel:not(:has(.datagrid-search-wrap:not([hidden]), .datagrid-filter, .datagrid-control-override:not(:empty), .datagrid-extra:not(:empty))) {
   display: none;
 }
 
 monks-datagrid .datagrid-layout:not(:has(
-  > .datagrid-panel > .datagrid-search-wrap,
+  > .datagrid-panel > .datagrid-search-wrap:not([hidden]),
   > .datagrid-panel .datagrid-filter,
   > .datagrid-panel > .datagrid-control-override:not(:empty),
   > .datagrid-panel > .datagrid-extra:not(:empty)
@@ -661,7 +661,7 @@ monks-datagrid:not([data-dg-ready]) .datagrid-sort:disabled {
 
 @container datagrid (min-width: 52rem) {
   monks-datagrid .datagrid-layout:has(
-    > .datagrid-panel > .datagrid-search-wrap,
+    > .datagrid-panel > .datagrid-search-wrap:not([hidden]),
     > .datagrid-panel .datagrid-filter,
     > .datagrid-panel > .datagrid-control-override:not(:empty),
     > .datagrid-panel > .datagrid-extra:not(:empty)
@@ -733,7 +733,7 @@ monks-datagrid:not([data-dg-ready]) .datagrid-sort:disabled {
   }
 
   monks-datagrid .datagrid-layout:has(
-    > .datagrid-panel > .datagrid-search-wrap,
+    > .datagrid-panel > .datagrid-search-wrap:not([hidden]),
     > .datagrid-panel .datagrid-filter,
     > .datagrid-panel > .datagrid-control-override:not(:empty),
     > .datagrid-panel > .datagrid-extra:not(:empty)

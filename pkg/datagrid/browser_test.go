@@ -1377,7 +1377,10 @@ func TestBrowserRefreshPreservesGeneratedFilterInteraction(t *testing.T) {
 // auto column whose every value is unique renders none either, an
 // explicit FilterUI keeps its facet regardless, a selection arriving by
 // URL renders its facet anyway so it can be seen and cleared, and
-// refresh re-derives all of it when rows cross the threshold.
+// refresh re-derives all of it when rows cross the threshold. The
+// search box follows the same scannable-table rule: hidden at five or
+// fewer rows, kept when search text arrives by URL, back after refresh
+// grows the grid, and a panel left with no controls at all collapses.
 func TestBrowserUselessFacetsAreSuppressed(t *testing.T) {
 	type item struct{ ID, Kind, Serial, Forced string }
 	rows := func(n int) []item {
@@ -1419,6 +1422,14 @@ func TestBrowserUselessFacetsAreSuppressed(t *testing.T) {
 	if err := Table(options("roomy"), rows(8)).Render(context.Background(), &out); err != nil {
 		t.Fatal(err)
 	}
+	if err := Table(options("tinyq"), rows(5)).Render(context.Background(), &out); err != nil {
+		t.Fatal(err)
+	}
+	bare := options("bare")
+	bare.Columns = bare.Columns[:2]
+	if err := Table(bare, rows(5)).Render(context.Background(), &out); err != nil {
+		t.Fatal(err)
+	}
 	out.WriteString(`</body></html>`)
 	html := out.String()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -1430,8 +1441,8 @@ func TestBrowserUselessFacetsAreSuppressed(t *testing.T) {
 	ctx := newBrowser(t)
 	if err := chromedp.Run(ctx,
 		chromedp.EmulateViewport(1200, 900),
-		chromedp.Navigate(server.URL+"/?dg.roomy.filter.serial=serial-3"),
-		chromedp.Poll(`document.querySelectorAll("monks-datagrid[data-dg-ready]").length === 2`, nil,
+		chromedp.Navigate(server.URL+"/?dg.roomy.filter.serial=serial-3&dg.tinyq.search=serial-3"),
+		chromedp.Poll(`document.querySelectorAll("monks-datagrid[data-dg-ready]").length === 4`, nil,
 			chromedp.WithPollingTimeout(10*time.Second)),
 	); err != nil {
 		t.Fatalf("open facet-worthiness fixture: %v", err)
@@ -1441,11 +1452,18 @@ func TestBrowserUselessFacetsAreSuppressed(t *testing.T) {
 		return `[...document.querySelectorAll('#` + id + ` details[data-dg-filter-column]')].map(d => d.dataset.dgFilterColumn)`
 	}
 	var got struct {
-		Tiny          []string `json:"tiny"`
-		Roomy         []string `json:"roomy"`
-		RoomyVisible  []string `json:"roomyVisible"`
-		SerialChecked []string `json:"serialChecked"`
-		Grown         []string `json:"grown"`
+		Tiny              []string `json:"tiny"`
+		Roomy             []string `json:"roomy"`
+		RoomyVisible      []string `json:"roomyVisible"`
+		SerialChecked     []string `json:"serialChecked"`
+		Grown             []string `json:"grown"`
+		TinySearchHidden  bool     `json:"tinySearchHidden"`
+		RoomySearchHidden bool     `json:"roomySearchHidden"`
+		TinyqSearchHidden bool     `json:"tinyqSearchHidden"`
+		TinyqSearchValue  string   `json:"tinyqSearchValue"`
+		TinyqVisible      []string `json:"tinyqVisible"`
+		BarePanelDisplay  string   `json:"barePanelDisplay"`
+		GrownSearchHidden bool     `json:"grownSearchHidden"`
 	}
 	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
 		const tiny = `+facets("tiny")+`;
@@ -1453,6 +1471,16 @@ func TestBrowserUselessFacetsAreSuppressed(t *testing.T) {
 		const roomyVisible = [...document.querySelectorAll('#roomy tr[data-dg-row]:not([hidden])')].map(r => r.dataset.dgRowId);
 		const serialChecked = [...document.querySelectorAll('#roomy input[data-dg-filter-column="serial"]')]
 			.filter(input => input.checked).map(input => input.value);
+		const searchHidden = (id) => {
+			const wrap = document.querySelector('#' + id + ' .datagrid-search-wrap');
+			return !wrap || getComputedStyle(wrap).display === 'none';
+		};
+		const tinySearchHidden = searchHidden('tiny');
+		const roomySearchHidden = searchHidden('roomy');
+		const tinyqSearchHidden = searchHidden('tinyq');
+		const tinyqSearchValue = document.querySelector('#tinyq [data-dg-role="search"]').value;
+		const tinyqVisible = [...document.querySelectorAll('#tinyq tr[data-dg-row]:not([hidden])')].map(r => r.dataset.dgRowId);
+		const barePanelDisplay = getComputedStyle(document.querySelector('#bare .datagrid-panel')).display;
 
 		const grid = document.querySelector('#tiny');
 		const clone = grid.querySelector('[data-dg-row-id="row-0"]').cloneNode(true);
@@ -1462,7 +1490,9 @@ func TestBrowserUselessFacetsAreSuppressed(t *testing.T) {
 		serial.textContent = 'serial-5';
 		grid.querySelector('.datagrid-table-wrap tbody').append(clone);
 		grid.refresh();
-		return {tiny, roomy, roomyVisible, serialChecked, grown: `+facets("tiny")+`};
+		return {tiny, roomy, roomyVisible, serialChecked, grown: `+facets("tiny")+`,
+			tinySearchHidden, roomySearchHidden, tinyqSearchHidden, tinyqSearchValue, tinyqVisible,
+			barePanelDisplay, grownSearchHidden: searchHidden('tiny')};
 	})()`, &got)); err != nil {
 		t.Fatal(err)
 	}
@@ -1477,6 +1507,20 @@ func TestBrowserUselessFacetsAreSuppressed(t *testing.T) {
 	}
 	if !slices.Equal(got.Grown, []string{"kind", "forced"}) {
 		t.Fatalf("grown grid facets = %v, want the recurring kind but not the all-unique serial", got.Grown)
+	}
+	if !got.TinySearchHidden || got.RoomySearchHidden {
+		t.Fatalf("search visibility = tiny hidden %v, roomy hidden %v; want the five-row grid's search hidden and the roomy grid's shown",
+			got.TinySearchHidden, got.RoomySearchHidden)
+	}
+	if got.TinyqSearchHidden || got.TinyqSearchValue != "serial-3" || !slices.Equal(got.TinyqVisible, []string{"row-3"}) {
+		t.Fatalf("URL-searched five-row grid = hidden %v, value %q, rows %v; want a visible, applied search",
+			got.TinyqSearchHidden, got.TinyqSearchValue, got.TinyqVisible)
+	}
+	if got.BarePanelDisplay != "none" {
+		t.Fatalf("bare grid panel display = %q, want none once search and facets are both suppressed", got.BarePanelDisplay)
+	}
+	if got.GrownSearchHidden {
+		t.Fatal("grown grid still hides its search box")
 	}
 }
 
