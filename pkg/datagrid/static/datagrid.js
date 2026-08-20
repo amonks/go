@@ -677,18 +677,36 @@
 
       for (const column of columns) {
         const optionsByValue = new Map();
+        let narrows = false;
         for (const record of this._records) {
           for (const option of record.filterValues.get(column.key) || []) {
-            if (!optionsByValue.has(option.value)) {
+            if (optionsByValue.has(option.value)) {
+              narrows = true;
+            } else {
               optionsByValue.set(option.value, option);
             }
           }
         }
-        for (const selected of this._state?.filters[column.key] || []) {
-          if (!optionsByValue.has(selected)) {
-            optionsByValue.set(selected, {
-              value: selected,
-              label: selected === "" ? "(Blank)" : selected,
+        const selected = this._state?.filters[column.key] || [];
+        // An auto facet that cannot usefully narrow the table is noise:
+        // with five or fewer rows the whole table is scannable, and a
+        // column where no value recurs (for a single-valued column,
+        // cardinality equals the row count) only re-selects individual
+        // rows. An active selection still renders so it stays visible and
+        // removable, and an explicit menu or typeahead column is the
+        // caller's decision either way.
+        if (
+          column.filterMode === "auto" &&
+          selected.length === 0 &&
+          (this._records.length <= 5 || !narrows)
+        ) {
+          continue;
+        }
+        for (const value of selected) {
+          if (!optionsByValue.has(value)) {
+            optionsByValue.set(value, {
+              value,
+              label: value === "" ? "(Blank)" : value,
             });
           }
         }
