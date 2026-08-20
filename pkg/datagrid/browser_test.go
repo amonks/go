@@ -71,9 +71,13 @@ func browserRows() []browserPerson {
 		"Radia Perlman", "Ken Thompson", "Dennis Ritchie", "Annie Easley",
 		"John Backus", "José Valim",
 	}
+	// One repeated city (index 6, inside the compact grid's ten rows)
+	// keeps the city facets rendered now that a facet whose every value
+	// is unique is dropped as useless; 17 distinct cities keep the
+	// people grid's city facet over the default typeahead threshold.
 	cities := []string{
 		"London", "New York", "Los Angeles", "Cambridge", "Rotterdam", "Milwaukee",
-		"Schenectady", "Manchester", "White Sulphur Springs", "Hampton", "Kansas City",
+		"London", "Manchester", "White Sulphur Springs", "Hampton", "Kansas City",
 		"Petoskey", "Portsmouth", "New Orleans", "Bronxville", "Birmingham", "Philadelphia", "São Paulo",
 	}
 	teams := []string{"Research", "Navy", "Systems"}
@@ -504,14 +508,14 @@ func TestBrowserOpenFacetDismissal(t *testing.T) {
 		const summary = (column) => grid.querySelector(
 			'details[data-dg-filter-column="' + column + '"] > summary',
 		);
-		summary('name').click();
+		summary('tags').click();
 		const first = `+openColumns+`;
 		summary('city').click();
 		return {first, second: `+openColumns+`};
 	})()`, &afterKeyboardOpen)); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(afterKeyboardOpen.First, []string{"name"}) || !slices.Equal(afterKeyboardOpen.Second, []string{"city"}) {
+	if !slices.Equal(afterKeyboardOpen.First, []string{"tags"}) || !slices.Equal(afterKeyboardOpen.Second, []string{"city"}) {
 		t.Fatalf("opening facets from the keyboard = %#v, want one open at a time", afterKeyboardOpen)
 	}
 
@@ -1036,10 +1040,10 @@ func TestBrowserCallerOwnedBodyRowHeaderCannotInventColumn(t *testing.T) {
 	if got.Sort != "" || len(got.Filters) != 0 {
 		t.Fatalf("body-only header became a state target: sort=%q filters=%v", got.Sort, got.Filters)
 	}
-	if !slices.Equal(got.RowIDs, []string{"zulu", "alpha"}) {
+	if !slices.Equal(got.RowIDs, []string{"zulu", "alpha", "bravo", "charlie", "delta", "echo"}) {
 		t.Fatalf("body-only sort control reordered rows: %v", got.RowIDs)
 	}
-	if got.BodyAriaSort != "" || got.BodySortCount != 2 {
+	if got.BodyAriaSort != "" || got.BodySortCount != 6 {
 		t.Fatalf("caller row headers changed: aria-sort=%q controls=%d", got.BodyAriaSort, got.BodySortCount)
 	}
 }
@@ -1057,9 +1061,16 @@ func callerOwnedBodyRowHeaderDocument(t *testing.T) string {
 		valueCell := renderComponent(t, Cell(CellProps{Column: "value", Value: value}))
 		return `<tr data-dg-row data-dg-row-id="` + id + `">` + bodyHeader + valueCell + `</tr>`
 	}
+	// Six rows with recurring values keep the "value" facet rendered:
+	// five or fewer rows, or a facet whose every value is unique, would
+	// suppress it and leave the invented-facet assertion vacuous.
 	table := templ.Raw(`<table id="caller-owned-row-header-table" class="datagrid-table">
 		<thead><tr><th scope="col">Row label</th>` + columnHeader + `</tr></thead>
-		<tbody>` + row("zulu", "Zulu", "second") + row("alpha", "Alpha", "first") + `</tbody>
+		<tbody>` +
+		row("zulu", "Zulu", "second") + row("alpha", "Alpha", "first") +
+		row("bravo", "Bravo", "first") + row("charlie", "Charlie", "second") +
+		row("delta", "Delta", "third") + row("echo", "Echo", "third") +
+		`</tbody>
 	</table>`)
 
 	var out strings.Builder
@@ -1072,7 +1083,7 @@ func callerOwnedBodyRowHeaderDocument(t *testing.T) string {
 	if err := Shell(ShellProps{
 		ID:          "caller-owned-row-header",
 		Label:       "Caller-owned row headers",
-		InitialRows: 2,
+		InitialRows: 6,
 	}).Render(ctx, &out); err != nil {
 		t.Fatal(err)
 	}
@@ -1361,6 +1372,114 @@ func TestBrowserRefreshPreservesGeneratedFilterInteraction(t *testing.T) {
 	}
 }
 
+// TestBrowserUselessFacetsAreSuppressed covers the facet-worthiness
+// rules: a grid of five or fewer rows renders no auto facets at all, an
+// auto column whose every value is unique renders none either, an
+// explicit FilterUI keeps its facet regardless, a selection arriving by
+// URL renders its facet anyway so it can be seen and cleared, and
+// refresh re-derives all of it when rows cross the threshold.
+func TestBrowserUselessFacetsAreSuppressed(t *testing.T) {
+	type item struct{ ID, Kind, Serial, Forced string }
+	rows := func(n int) []item {
+		kinds := []string{"alpha", "alpha", "beta", "beta", "gamma", "alpha", "beta", "gamma"}
+		out := make([]item, n)
+		for i := range out {
+			out[i] = item{
+				ID:     fmt.Sprintf("row-%d", i),
+				Kind:   kinds[i%len(kinds)],
+				Serial: fmt.Sprintf("serial-%d", i),
+				Forced: fmt.Sprintf("forced-%d", i),
+			}
+		}
+		return out
+	}
+	options := func(id string) Options[item] {
+		forced := TextColumn("forced", "Forced", func(row item) string { return row.Forced })
+		forced.FilterUI = FilterMenu
+		return Options[item]{
+			ID:      id,
+			Caption: "Facet worthiness",
+			Columns: []Column[item]{
+				TextColumn("kind", "Kind", func(row item) string { return row.Kind }),
+				TextColumn("serial", "Serial", func(row item) string { return row.Serial }),
+				forced,
+			},
+			RowID: func(row item) string { return row.ID },
+		}
+	}
+	var out strings.Builder
+	out.WriteString(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>facet worthiness</title>`)
+	if err := Head().Render(context.Background(), &out); err != nil {
+		t.Fatal(err)
+	}
+	out.WriteString(`</head><body>`)
+	if err := Table(options("tiny"), rows(5)).Render(context.Background(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if err := Table(options("roomy"), rows(8)).Render(context.Background(), &out); err != nil {
+		t.Fatal(err)
+	}
+	out.WriteString(`</body></html>`)
+	html := out.String()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(html))
+	}))
+	defer server.Close()
+
+	ctx := newBrowser(t)
+	if err := chromedp.Run(ctx,
+		chromedp.EmulateViewport(1200, 900),
+		chromedp.Navigate(server.URL+"/?dg.roomy.filter.serial=serial-3"),
+		chromedp.Poll(`document.querySelectorAll("monks-datagrid[data-dg-ready]").length === 2`, nil,
+			chromedp.WithPollingTimeout(10*time.Second)),
+	); err != nil {
+		t.Fatalf("open facet-worthiness fixture: %v", err)
+	}
+
+	facets := func(id string) string {
+		return `[...document.querySelectorAll('#` + id + ` details[data-dg-filter-column]')].map(d => d.dataset.dgFilterColumn)`
+	}
+	var got struct {
+		Tiny          []string `json:"tiny"`
+		Roomy         []string `json:"roomy"`
+		RoomyVisible  []string `json:"roomyVisible"`
+		SerialChecked []string `json:"serialChecked"`
+		Grown         []string `json:"grown"`
+	}
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
+		const tiny = `+facets("tiny")+`;
+		const roomy = `+facets("roomy")+`;
+		const roomyVisible = [...document.querySelectorAll('#roomy tr[data-dg-row]:not([hidden])')].map(r => r.dataset.dgRowId);
+		const serialChecked = [...document.querySelectorAll('#roomy input[data-dg-filter-column="serial"]')]
+			.filter(input => input.checked).map(input => input.value);
+
+		const grid = document.querySelector('#tiny');
+		const clone = grid.querySelector('[data-dg-row-id="row-0"]').cloneNode(true);
+		clone.dataset.dgRowId = 'row-5';
+		const serial = clone.querySelector('[data-dg-column="serial"]');
+		serial.dataset.dgValue = 'serial-5';
+		serial.textContent = 'serial-5';
+		grid.querySelector('.datagrid-table-wrap tbody').append(clone);
+		grid.refresh();
+		return {tiny, roomy, roomyVisible, serialChecked, grown: `+facets("tiny")+`};
+	})()`, &got)); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got.Tiny, []string{"forced"}) {
+		t.Fatalf("five-row grid facets = %v, want only the explicit menu column", got.Tiny)
+	}
+	if !slices.Equal(got.Roomy, []string{"kind", "serial", "forced"}) {
+		t.Fatalf("roomy grid facets = %v, want the recurring, URL-selected, and explicit columns", got.Roomy)
+	}
+	if !slices.Equal(got.RoomyVisible, []string{"row-3"}) || !slices.Equal(got.SerialChecked, []string{"serial-3"}) {
+		t.Fatalf("URL-selected facet state = rows %v checked %v", got.RoomyVisible, got.SerialChecked)
+	}
+	if !slices.Equal(got.Grown, []string{"kind", "forced"}) {
+		t.Fatalf("grown grid facets = %v, want the recurring kind but not the all-unique serial", got.Grown)
+	}
+}
+
 func historyURL(t *testing.T, ctx context.Context) string {
 	t.Helper()
 	var value string
@@ -1397,7 +1516,9 @@ func TestBrowserHandwrittenMetadataDefaultsAndNoHookHotPath(t *testing.T) {
 				thead.innerHTML = '<tr><th data-dg-column="value" data-dg-sort-kind="text" data-dg-filter="auto" data-dg-search="true">Value</th></tr>';
 				const tbody = document.createElement('tbody');
 				for (let index = 0; index < count; index += 1) {
-					const value = 'Value ' + index;
+					// The last row repeats the previous value: a facet whose
+					// every value is unique would be dropped as useless.
+					const value = 'Value ' + Math.min(index, count - 2);
 					const row = document.createElement('tr');
 					row.dataset.dgRow = '';
 					row.dataset.dgRowId = String(index);
@@ -1419,8 +1540,8 @@ func TestBrowserHandwrittenMetadataDefaultsAndNoHookHotPath(t *testing.T) {
 				document.body.append(grid);
 				return grid;
 			};
-			window.datagridManual15 = makeGrid('manual-15', 16, true);
-			window.datagridManual16 = makeGrid('manual-16', 16, false);
+			window.datagridManual15 = makeGrid('manual-15', 17, true);
+			window.datagridManual16 = makeGrid('manual-16', 17, false);
 
 			const textGrid = document.createElement('monks-datagrid');
 			textGrid.id = 'manual-text-control';
