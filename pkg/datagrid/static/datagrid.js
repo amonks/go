@@ -1599,5 +1599,13 @@
     }
   }
 
-  customElements.define("monks-datagrid", DatagridElement);
+  // Guarded because this asset can be emitted more than once on a page:
+  // a host embedding someone else's rendered body — backupd's dashboard
+  // inside opsui chrome is the case that found this — may already have
+  // loaded it, and a second define() throws NotSupportedError and takes
+  // the rest of this script down with it. First definition wins; they
+  // are the same class.
+  if (!customElements.get("monks-datagrid")) {
+    customElements.define("monks-datagrid", DatagridElement);
+  }
 })();
