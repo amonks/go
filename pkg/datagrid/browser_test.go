@@ -1,55 +1,29 @@
 package datagrid
 
 import (
-	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/a-h/templ"
 	"github.com/chromedp/cdproto/emulation"
-	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 	"github.com/chromedp/chromedp/kb"
 	"pgregory.net/rapid"
-)
 
-// browserLaunchTimeout is how long a headless Chrome gets to print its
-// "DevTools listening on ws://..." line, browserDialTimeout how long
-// its DevTools socket then gets to accept chromedp's connection, and
-// browserBudget the wall-clock allowance for one test's whole chromedp
-// session, launch included.
-//
-// All three are ceilings, not costs, and deliberately loose. The first
-// Chromium launch on a fresh CI builder cold-reads ~300MB from a slow
-// image device (specs/ci.md § Chromium in the builder) — CI has seen
-// the DevTools line arrive at 56s and the dial miss chromedp's 10s
-// default after it — which is why newBrowser pre-reads Chromium's
-// install directory into the page cache first, under no deadline. The
-// timeouts backstop what the pre-read doesn't cover: the system
-// libraries Chromium also loads, and a busier builder than the one
-// measured. The budget must clear launch plus dial with room for the
-// test itself, which takes ~1.5s.
-const (
-	browserLaunchTimeout = 2 * time.Minute
-	browserDialTimeout   = time.Minute
-	browserBudget        = 5 * time.Minute
+	"monks.co/pkg/browsertest"
 )
 
 type browserPerson struct {
@@ -223,142 +197,13 @@ func browserServer(t *testing.T) *httptest.Server {
 	}))
 }
 
-func chromePath(t *testing.T) string {
-	t.Helper()
-	for _, candidate := range []string{"google-chrome", "google-chrome-stable", "chromium", "chromium-browser"} {
-		path, err := exec.LookPath(candidate)
-		if err != nil {
-			continue
-		}
-		// On macOS, launching a Chrome.app binary through a symlink makes
-		// its framework loader resolve relative paths from the wrong parent.
-		if resolved, err := filepath.EvalSymlinks(path); err == nil {
-			return resolved
-		}
-		return path
-	}
-	t.Fatal("Chrome/Chromium is required for datagrid browser tests")
-	return ""
-}
-
-// warmChromeOnce guards the one pre-read of Chromium's install
-// directory per test binary (see browserLaunchTimeout).
-var warmChromeOnce sync.Once
-
-func newBrowser(t *testing.T) context.Context {
-	t.Helper()
-	chrome := chromePath(t)
-	warmChromeOnce.Do(func() {
-		dir, ok := chromeInstallDir(chrome)
-		if !ok {
-			t.Logf("no resources.pak beside %s; skipping the page-cache pre-read", chrome)
-			return
-		}
-		start := time.Now()
-		read := warmPageCache(dir)
-		t.Logf("pre-read %.1fMB under %s into the page cache in %s", float64(read)/(1<<20), dir, time.Since(start).Round(time.Millisecond))
-	})
-	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(),
-		append(chromedp.DefaultExecAllocatorOptions[:],
-			chromedp.ExecPath(chrome),
-			chromedp.UserDataDir(t.TempDir()),
-			chromedp.Flag("headless", "new"),
-			chromedp.Flag("disable-gpu", true),
-			chromedp.Flag("no-sandbox", true),
-			chromedp.WSURLReadTimeout(browserLaunchTimeout),
-		)...)
-	t.Cleanup(cancelAlloc)
-	ctx, cancelBrowser := chromedp.NewContext(allocCtx,
-		chromedp.WithBrowserOption(chromedp.WithDialTimeout(browserDialTimeout)))
-	t.Cleanup(cancelBrowser)
-	ctx, cancelTimeout := context.WithTimeout(ctx, browserBudget)
-	t.Cleanup(cancelTimeout)
-	t.Cleanup(func() {
-		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-		defer cancel()
-		_ = chromedp.Cancel(cleanup)
-	})
-	captureBrowserConsole(t, ctx)
-	return ctx
-}
-
-// chromeInstallDir returns the directory the resolved Chrome binary
-// lives in, if it looks like a Chrome install directory: resources.pak
-// sits beside every Linux Chrome and Chromium binary. The check keeps
-// the pre-read off a shared bin directory that a wrapper script might
-// resolve into (and off macOS's near-empty Contents/MacOS), where it
-// would read a lot and warm nothing.
-func chromeInstallDir(chrome string) (string, bool) {
-	dir := filepath.Dir(chrome)
-	if _, err := os.Stat(filepath.Join(dir, "resources.pak")); err != nil {
-		return "", false
-	}
-	return dir, true
-}
-
-// warmPageCache reads every regular file under dir so the kernel's page
-// cache holds it, and returns the bytes read. Symlinks are skipped —
-// Alpine's install directory aliases its 282MB binary as chrome, and
-// the file behind a symlink is read as itself if it lives here — as
-// are unreadable entries and a missing dir: a warm-up is best-effort
-// by design, never a reason to fail a test.
-func warmPageCache(dir string) (read int64) {
-	_ = filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || !entry.Type().IsRegular() {
-			return nil
-		}
-		file, err := os.Open(path)
-		if err != nil {
-			return nil
-		}
-		defer file.Close()
-		n, _ := io.Copy(io.Discard, file)
-		read += n
-		return nil
-	})
-	return read
-}
-
-func captureBrowserConsole(t *testing.T, ctx context.Context) {
-	t.Helper()
-	var mu sync.Mutex
-	chromedp.ListenTarget(ctx, func(event any) {
-		switch event := event.(type) {
-		case *runtime.EventConsoleAPICalled:
-			mu.Lock()
-			defer mu.Unlock()
-			parts := make([]string, 0, len(event.Args))
-			for _, argument := range event.Args {
-				if len(argument.Value) > 0 {
-					parts = append(parts, string(argument.Value))
-				} else if argument.Description != "" {
-					parts = append(parts, argument.Description)
-				}
-			}
-			t.Logf("browser console.%s: %s", event.Type, strings.Join(parts, " "))
-		case *runtime.EventExceptionThrown:
-			mu.Lock()
-			defer mu.Unlock()
-			details := event.ExceptionDetails
-			if details == nil {
-				return
-			}
-			message := details.Text
-			if details.Exception != nil && details.Exception.Description != "" {
-				message = details.Exception.Description
-			}
-			t.Logf("browser exception: %s", message)
-		}
-	})
-}
-
 func navigateReady(t *testing.T, ctx context.Context, target string) {
 	t.Helper()
 	if err := chromedp.Run(ctx,
 		chromedp.EmulateViewport(1440, 1000),
-		chromedp.Navigate(target),
+		browsertest.Step("open "+target, chromedp.Navigate(target)),
 		chromedp.Poll(`document.querySelectorAll("monks-datagrid[data-dg-ready]").length === 3`, nil,
-			chromedp.WithPollingTimeout(10*time.Second)),
+			browsertest.PollTimeout),
 	); err != nil {
 		t.Fatalf("open datagrid fixture: %v", err)
 	}
@@ -367,7 +212,7 @@ func navigateReady(t *testing.T, ctx context.Context, target string) {
 func TestBrowserAutoThemeInheritsForcedDocumentScheme(t *testing.T) {
 	server := browserServer(t)
 	defer server.Close()
-	ctx := newBrowser(t)
+	ctx := browsertest.NewBrowser(t)
 	navigateReady(t, ctx, server.URL+"/")
 
 	var got struct {
@@ -405,7 +250,7 @@ func TestBrowserAutoThemeInheritsForcedDocumentScheme(t *testing.T) {
 func TestBrowserClosedFilterPopoversStayOutOfNarrowLayout(t *testing.T) {
 	server := browserServer(t)
 	defer server.Close()
-	ctx := newBrowser(t)
+	ctx := browsertest.NewBrowser(t)
 	navigateReady(t, ctx, server.URL+"/")
 
 	var got struct {
@@ -441,7 +286,7 @@ func TestBrowserClosedFilterPopoversStayOutOfNarrowLayout(t *testing.T) {
 func TestBrowserOpenFacetDismissal(t *testing.T) {
 	server := browserServer(t)
 	defer server.Close()
-	ctx := newBrowser(t)
+	ctx := browsertest.NewBrowser(t)
 	navigateReady(t, ctx, server.URL+"/")
 
 	openColumns := `[...document.querySelectorAll('#people details[data-dg-filter-column][open]')]
@@ -452,8 +297,8 @@ func TestBrowserOpenFacetDismissal(t *testing.T) {
 		Filters []string `json:"filters"`
 	}
 	if err := chromedp.Run(ctx,
-		chromedp.Click(`#people details[data-dg-filter-column="team"] > summary`, chromedp.ByQuery),
-		chromedp.Click(`#people details[data-dg-filter-column="team"] label[data-dg-filter-value="Navy"]`, chromedp.ByQuery),
+		browsertest.Step("open the team facet", chromedp.Click(`#people details[data-dg-filter-column="team"] > summary`, chromedp.ByQuery)),
+		browsertest.Step("check Navy in the team facet", chromedp.Click(`#people details[data-dg-filter-column="team"] label[data-dg-filter-value="Navy"]`, chromedp.ByQuery)),
 		chromedp.Evaluate(`({
 			open: `+openColumns+`,
 			filters: document.querySelector('#people').getState().filters.team || [],
@@ -467,7 +312,7 @@ func TestBrowserOpenFacetDismissal(t *testing.T) {
 
 	var afterOutside []string
 	if err := chromedp.Run(ctx,
-		chromedp.Click(`h1`, chromedp.ByQuery),
+		browsertest.Step("press outside the grid", chromedp.Click(`h1`, chromedp.ByQuery)),
 		chromedp.Evaluate(openColumns, &afterOutside),
 	); err != nil {
 		t.Fatal(err)
@@ -483,8 +328,8 @@ func TestBrowserOpenFacetDismissal(t *testing.T) {
 		Compact []string `json:"compact"`
 	}
 	if err := chromedp.Run(ctx,
-		chromedp.Click(`#people details[data-dg-filter-column="team"] > summary`, chromedp.ByQuery),
-		chromedp.Click(`#compact details[data-dg-filter-column="city"] > summary`, chromedp.ByQuery),
+		browsertest.Step("reopen the team facet", chromedp.Click(`#people details[data-dg-filter-column="team"] > summary`, chromedp.ByQuery)),
+		browsertest.Step("open the second grid's city facet", chromedp.Click(`#compact details[data-dg-filter-column="city"] > summary`, chromedp.ByQuery)),
 		chromedp.Evaluate(`({
 			people: `+openColumns+`,
 			compact: [...document.querySelectorAll('#compact details[data-dg-filter-column][open]')]
@@ -527,7 +372,7 @@ func TestBrowserOpenFacetDismissal(t *testing.T) {
 		FocusedIsToggle bool     `json:"focusedIsToggle"`
 	}
 	if err := chromedp.Run(ctx,
-		chromedp.Focus(`#people details[data-dg-filter-column="city"] [data-dg-role="filter-search"]`, chromedp.ByQuery),
+		browsertest.Step("focus the city facet's search field", chromedp.Focus(`#people details[data-dg-filter-column="city"] [data-dg-role="filter-search"]`, chromedp.ByQuery)),
 		chromedp.KeyEvent(kb.Escape),
 		chromedp.Evaluate(`({
 			open: `+openColumns+`,
@@ -550,7 +395,7 @@ func TestBrowserOpenFacetDismissal(t *testing.T) {
 func TestBrowserFacetSelectionsShareOneColumn(t *testing.T) {
 	server := browserServer(t)
 	defer server.Close()
-	ctx := newBrowser(t)
+	ctx := browsertest.NewBrowser(t)
 	navigateReady(t, ctx, server.URL+"/")
 
 	measure := `(() => {
@@ -598,9 +443,9 @@ func TestBrowserFacetSelectionsShareOneColumn(t *testing.T) {
 	// A selection wider than "All" still ends in the same column.
 	var mixed []edge
 	if err := chromedp.Run(ctx,
-		chromedp.Click(`#people details[data-dg-filter-column="team"] > summary`, chromedp.ByQuery),
-		chromedp.Click(`#people details[data-dg-filter-column="team"] label[data-dg-filter-value="Research"]`, chromedp.ByQuery),
-		chromedp.Click(`h1`, chromedp.ByQuery),
+		browsertest.Step("open the team facet", chromedp.Click(`#people details[data-dg-filter-column="team"] > summary`, chromedp.ByQuery)),
+		browsertest.Step("check Research in the team facet", chromedp.Click(`#people details[data-dg-filter-column="team"] label[data-dg-filter-value="Research"]`, chromedp.ByQuery)),
+		browsertest.Step("press outside the grid", chromedp.Click(`h1`, chromedp.ByQuery)),
 		chromedp.Evaluate(measure, &mixed),
 	); err != nil {
 		t.Fatal(err)
@@ -645,12 +490,12 @@ func TestBrowserOpenFilterDropdownPaintsOverFollowingGrid(t *testing.T) {
 	}))
 	defer server.Close()
 
-	ctx := newBrowser(t)
+	ctx := browsertest.NewBrowser(t)
 	if err := chromedp.Run(ctx,
 		chromedp.EmulateViewport(1440, 1000),
-		chromedp.Navigate(server.URL+"/"),
+		browsertest.Step("open the stacked-grids fixture", chromedp.Navigate(server.URL+"/")),
 		chromedp.Poll(`document.querySelectorAll("monks-datagrid[data-dg-ready]").length === 2`, nil,
-			chromedp.WithPollingTimeout(10*time.Second)),
+			browsertest.PollTimeout),
 	); err != nil {
 		t.Fatalf("open stacked-grids fixture: %v", err)
 	}
@@ -695,7 +540,7 @@ func TestBrowserOpenFilterDropdownPaintsOverFollowingGrid(t *testing.T) {
 func TestBrowserInteractionsPreserveRowsURLAndGridIsolation(t *testing.T) {
 	server := browserServer(t)
 	defer server.Close()
-	ctx := newBrowser(t)
+	ctx := browsertest.NewBrowser(t)
 	navigateReady(t, ctx, server.URL+"/?keep=yes&dg.compact.search=hopper")
 
 	var initial struct {
@@ -731,7 +576,7 @@ func TestBrowserInteractionsPreserveRowsURLAndGridIsolation(t *testing.T) {
 			window.datagridProbeConnected = 0;
 			window.datagridProbeDisconnected = 0;
 		})()`, nil),
-		chromedp.Click(`#people th[data-dg-column="score"] [data-dg-role="sort"]`, chromedp.ByQuery),
+		browsertest.Step("sort by score", chromedp.Click(`#people th[data-dg-column="score"] [data-dg-role="sort"]`, chromedp.ByQuery)),
 		chromedp.Evaluate(`({
 			first: document.querySelector('#people tr[data-dg-row]:not([hidden])').dataset.dgRowId,
 			aria: document.querySelector('#people th[data-dg-column="score"]').getAttribute('aria-sort'),
@@ -785,7 +630,7 @@ func TestBrowserInteractionsPreserveRowsURLAndGridIsolation(t *testing.T) {
 		})()`, nil),
 		chromedp.Evaluate(`(() => { const input = document.querySelector('#people-search'); input.value = 'jose'; input.dispatchEvent(new Event('input', {bubbles:true})); })()`, nil),
 		chromedp.Poll(`document.querySelectorAll('#people tr[data-dg-row]:not([hidden])').length === 1`, nil,
-			chromedp.WithPollingTimeout(5*time.Second)),
+			browsertest.PollTimeout),
 		chromedp.Evaluate(`({
 			visible: [...document.querySelectorAll('#people tr[data-dg-row]:not([hidden])')].map(r => r.dataset.dgRowId),
 			url: location.href,
@@ -899,7 +744,7 @@ func TestBrowserInteractionsPreserveRowsURLAndGridIsolation(t *testing.T) {
 func TestBrowserTableUsesCompactMonospacedBackgroundlessStyling(t *testing.T) {
 	server := browserServer(t)
 	defer server.Close()
-	ctx := newBrowser(t)
+	ctx := browsertest.NewBrowser(t)
 	navigateReady(t, ctx, server.URL)
 
 	var got struct {
@@ -993,7 +838,7 @@ func TestBrowserCallerOwnedBodyRowHeaderCannotInventColumn(t *testing.T) {
 		_, _ = io.WriteString(w, callerOwnedBodyRowHeaderDocument(t))
 	}))
 	defer server.Close()
-	ctx := newBrowser(t)
+	ctx := browsertest.NewBrowser(t)
 
 	var got struct {
 		Columns       []string            `json:"columns"`
@@ -1006,9 +851,9 @@ func TestBrowserCallerOwnedBodyRowHeaderCannotInventColumn(t *testing.T) {
 	}
 	if err := chromedp.Run(ctx,
 		chromedp.EmulateViewport(900, 700),
-		chromedp.Navigate(server.URL),
+		browsertest.Step("open the caller-owned row-header fixture", chromedp.Navigate(server.URL)),
 		chromedp.Poll(`document.querySelector('#caller-owned-row-header')?.hasAttribute('data-dg-ready')`, nil,
-			chromedp.WithPollingTimeout(5*time.Second)),
+			browsertest.PollTimeout),
 		chromedp.Evaluate(`(() => {
 			const grid = document.querySelector('#caller-owned-row-header');
 			grid.setState({sort:'body-only', filters:{'body-only':['Alpha']}}, {updateURL:false});
@@ -1098,7 +943,7 @@ func TestBrowserNoScriptEmptyStateMatchesInitialRows(t *testing.T) {
 		_, _ = io.WriteString(w, html)
 	}))
 	defer server.Close()
-	ctx := newBrowser(t)
+	ctx := browsertest.NewBrowser(t)
 
 	var got struct {
 		ReadyCount       int    `json:"readyCount"`
@@ -1110,8 +955,8 @@ func TestBrowserNoScriptEmptyStateMatchesInitialRows(t *testing.T) {
 	}
 	if err := chromedp.Run(ctx,
 		emulation.SetScriptExecutionDisabled(true),
-		chromedp.Navigate(server.URL),
-		chromedp.WaitReady("body", chromedp.ByQuery),
+		browsertest.Step("open the no-script document", chromedp.Navigate(server.URL)),
+		browsertest.Step("the no-script document parses", chromedp.WaitReady("body", chromedp.ByQuery)),
 		chromedp.Evaluate(`(() => {
 			const empty = document.querySelector('#empty-grid [data-dg-role="empty"]');
 			const populated = document.querySelector('#populated-grid [data-dg-role="empty"]');
@@ -1144,7 +989,7 @@ func TestBrowserNoScriptEmptyStateMatchesInitialRows(t *testing.T) {
 func TestBrowserGeneratedControlsHooksAndPopstate(t *testing.T) {
 	server := browserServer(t)
 	defer server.Close()
-	ctx := newBrowser(t)
+	ctx := browsertest.NewBrowser(t)
 	navigateReady(t, ctx, server.URL+"/?keep=yes")
 
 	var filtered struct {
@@ -1279,7 +1124,7 @@ func TestBrowserGeneratedControlsHooksAndPopstate(t *testing.T) {
 			window.dispatchEvent(new PopStateEvent('popstate'));
 		})()`, nil),
 		chromedp.Poll(`document.querySelector('#people').getState().search === 'ada'`, nil,
-			chromedp.WithPollingTimeout(5*time.Second)),
+			browsertest.PollTimeout),
 		chromedp.Evaluate(`({
 			peopleSearch: document.querySelector('#people').getState().search,
 			peopleVisible: [...document.querySelectorAll('#people tr[data-dg-row]:not([hidden])')].map(row => row.dataset.dgRowId),
@@ -1325,7 +1170,7 @@ func TestBrowserGeneratedControlsHooksAndPopstate(t *testing.T) {
 func TestBrowserRefreshPreservesGeneratedFilterInteraction(t *testing.T) {
 	server := browserServer(t)
 	defer server.Close()
-	ctx := newBrowser(t)
+	ctx := browsertest.NewBrowser(t)
 	navigateReady(t, ctx, server.URL+"/")
 
 	var got struct {
@@ -1438,12 +1283,12 @@ func TestBrowserUselessFacetsAreSuppressed(t *testing.T) {
 	}))
 	defer server.Close()
 
-	ctx := newBrowser(t)
+	ctx := browsertest.NewBrowser(t)
 	if err := chromedp.Run(ctx,
 		chromedp.EmulateViewport(1200, 900),
-		chromedp.Navigate(server.URL+"/?dg.roomy.filter.serial=serial-3&dg.tinyq.search=serial-3"),
+		browsertest.Step("open the facet-worthiness fixture", chromedp.Navigate(server.URL+"/?dg.roomy.filter.serial=serial-3&dg.tinyq.search=serial-3")),
 		chromedp.Poll(`document.querySelectorAll("monks-datagrid[data-dg-ready]").length === 4`, nil,
-			chromedp.WithPollingTimeout(10*time.Second)),
+			browsertest.PollTimeout),
 	); err != nil {
 		t.Fatalf("open facet-worthiness fixture: %v", err)
 	}
@@ -1536,7 +1381,7 @@ func historyURL(t *testing.T, ctx context.Context) string {
 func TestBrowserHandwrittenMetadataDefaultsAndNoHookHotPath(t *testing.T) {
 	server := browserServer(t)
 	defer server.Close()
-	ctx := newBrowser(t)
+	ctx := browsertest.NewBrowser(t)
 	navigateReady(t, ctx, server.URL+"/")
 
 	if err := chromedp.Run(ctx,
@@ -1606,7 +1451,7 @@ func TestBrowserHandwrittenMetadataDefaultsAndNoHookHotPath(t *testing.T) {
 			window.datagridTextControl = textGrid;
 		})()`, nil),
 		chromedp.Poll(`window.datagridManual15?.hasAttribute('data-dg-ready') && window.datagridManual16?.hasAttribute('data-dg-ready') && window.datagridTextControl?.hasAttribute('data-dg-ready')`, nil,
-			chromedp.WithPollingTimeout(5*time.Second)),
+			browsertest.PollTimeout),
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -1697,7 +1542,7 @@ func TestBrowserHandwrittenMetadataDefaultsAndNoHookHotPath(t *testing.T) {
 func TestBrowserPipelineMatchesReferenceProperties(t *testing.T) {
 	server := browserServer(t)
 	defer server.Close()
-	ctx := newBrowser(t)
+	ctx := browsertest.NewBrowser(t)
 	navigateReady(t, ctx, server.URL+"/")
 	rows := browserRows()
 	codec, err := QueryCodecForOptions(browserOptions("people"))
@@ -1823,57 +1668,6 @@ func boolInt(value bool) int {
 		return 1
 	}
 	return 0
-}
-
-func TestChromeInstallDirWantsResourcesBesideTheBinary(t *testing.T) {
-	dir := t.TempDir()
-	chrome := filepath.Join(dir, "chromium")
-	if err := os.WriteFile(chrome, nil, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if got, ok := chromeInstallDir(chrome); ok {
-		t.Fatalf("chromeInstallDir without resources.pak = %q, true; want false", got)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "resources.pak"), nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if got, ok := chromeInstallDir(chrome); !ok || got != dir {
-		t.Fatalf("chromeInstallDir with resources.pak = %q, %v; want %q, true", got, ok, dir)
-	}
-}
-
-func TestWarmPageCacheReadsEveryRegularFileUnderDir(t *testing.T) {
-	dir := t.TempDir()
-	write := func(rel string, size int) {
-		t.Helper()
-		path := filepath.Join(dir, rel)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, bytes.Repeat([]byte("x"), size), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	write("chrome", 1000)
-	write("locales/en-US.pak", 300)
-	write("swiftshader/libEGL.so", 7)
-	if err := os.Mkdir(filepath.Join(dir, "empty"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// Symlinks — an alias of the binary, a dangling one — are skipped,
-	// as is anything that isn't a regular file. None of them fail it.
-	if err := os.Symlink("chrome", filepath.Join(dir, "chrome-link")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink("missing", filepath.Join(dir, "dangling")); err != nil {
-		t.Fatal(err)
-	}
-	if got, want := warmPageCache(dir), int64(1000+300+7); got != want {
-		t.Fatalf("warmPageCache(%s) read %d bytes, want %d", dir, got, want)
-	}
-	if got := warmPageCache(filepath.Join(dir, "missing")); got != 0 {
-		t.Fatalf("warmPageCache(missing dir) read %d bytes, want 0", got)
-	}
 }
 
 func TestPreviewServe(t *testing.T) {
