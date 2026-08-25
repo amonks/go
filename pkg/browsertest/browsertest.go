@@ -90,6 +90,20 @@ const (
 // which drifts from StepTimeout the moment either moves.
 var PollTimeout = chromedp.WithPollingTimeout(StepTimeout)
 
+// BootTimeout is the allowance for a poll that spans a page's whole
+// boot — fetching and compiling a wasm binary, then opening its
+// storage — rather than one wait within a booted page. On a fresh CI
+// builder that boot runs against an image disk that cold-reads at
+// ~8MB/s, contended by every other package's builds, and a hermit
+// open alone has outrun 30s there (CI runs 1345 and 1346) where it
+// takes well under a second warm. StepTimeout sizes the one wait a
+// booted page makes; a poll for "ready" is not that, and takes this
+// instead. PollBootTimeout is its poll form, as PollTimeout is
+// StepTimeout's.
+const BootTimeout = 3 * time.Minute
+
+var PollBootTimeout = chromedp.WithPollingTimeout(BootTimeout)
+
 // launchTimeout is how long a headless Chrome gets to print its
 // "DevTools listening on ws://..." line, and dialTimeout how long its
 // DevTools socket then gets to accept chromedp's connection. Both back
