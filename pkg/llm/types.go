@@ -154,7 +154,7 @@ type Model struct {
 	BaseURL                string   // API endpoint
 	APIKey                 string   // API key (resolved from api-key-command by caller)
 	ContextWindow          int      // Max context tokens
-	MaxTokens              int      // Max output tokens
+	MaxTokens              int      // The model's output ceiling; 0 when unknown (see ModelLimits)
 	Reasoning              bool     // Supports thinking mode
 	UseMaxCompletionTokens bool     // Use max_completion_tokens instead of max_tokens (for o1/o3/o4 models)
 	InputTypes             []string // "text", "image"
@@ -223,9 +223,18 @@ const (
 )
 
 // StreamOptions contains options for streaming completions.
+//
+// Output is bounded by MaxTokens when the caller has a number in mind,
+// or by the model's own output ceiling when MaxOutput is set. The two
+// are exclusive. With neither, the package sends the model's ceiling
+// where it knows one (Model.MaxTokens) and otherwise leaves the choice
+// to the provider — which OpenAI's APIs allow and Anthropic's does not,
+// so an Anthropic call with no ceiling known is an error rather than a
+// number this package made up.
 type StreamOptions struct {
 	Temperature    *float64
 	MaxTokens      *int
+	MaxOutput      bool
 	CacheRetention CacheRetention
 	ThinkingLevel  ThinkingLevel
 	SessionID      string

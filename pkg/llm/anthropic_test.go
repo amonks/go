@@ -250,7 +250,7 @@ func TestConvertToAnthropicRequest_ForcesToolChoice(t *testing.T) {
 		ToolChoice: "recommend",
 	}
 
-	anthropicReq := convertToAnthropicRequest(Model{ID: "claude"}, req, StreamOptions{})
+	anthropicReq := mustAnthropicRequest(t, Model{ID: "claude"}, req, StreamOptions{})
 
 	if anthropicReq.ToolChoice == nil {
 		t.Fatal("expected tool_choice to be set when Request.ToolChoice is non-empty")
@@ -275,7 +275,7 @@ func TestConvertToAnthropicRequest_NoToolChoiceByDefault(t *testing.T) {
 		Tools: []Tool{{Name: "recommend"}},
 	}
 
-	anthropicReq := convertToAnthropicRequest(Model{ID: "claude"}, req, StreamOptions{})
+	anthropicReq := mustAnthropicRequest(t, Model{ID: "claude"}, req, StreamOptions{})
 	if anthropicReq.ToolChoice != nil {
 		t.Errorf("expected no tool_choice by default, got %+v", anthropicReq.ToolChoice)
 	}
@@ -283,7 +283,7 @@ func TestConvertToAnthropicRequest_NoToolChoiceByDefault(t *testing.T) {
 
 func TestConvertToAnthropicRequest_AddsCacheControlMarkers(t *testing.T) {
 	req := Request{
-		System:   []SystemBlock{{Text: "system prompt", CacheBreakpoint: true}},
+		System: []SystemBlock{{Text: "system prompt", CacheBreakpoint: true}},
 		Messages: []Message{
 			UserMessage{
 				Role: "user",
@@ -305,7 +305,7 @@ func TestConvertToAnthropicRequest_AddsCacheControlMarkers(t *testing.T) {
 	}
 
 	t.Run("cache retention", func(t *testing.T) {
-		anthropicReq := convertToAnthropicRequest(Model{ID: "claude"}, req, StreamOptions{CacheRetention: CacheShort})
+		anthropicReq := mustAnthropicRequest(t, Model{ID: "claude"}, req, StreamOptions{CacheRetention: CacheShort})
 
 		if len(anthropicReq.System) == 0 || anthropicReq.System[len(anthropicReq.System)-1].CacheControl == nil {
 			t.Fatalf("expected cache_control on system prompt")
@@ -334,7 +334,7 @@ func TestConvertToAnthropicRequest_AddsCacheControlMarkers(t *testing.T) {
 	})
 
 	t.Run("default retention", func(t *testing.T) {
-		anthropicReq := convertToAnthropicRequest(Model{ID: "claude"}, req, StreamOptions{})
+		anthropicReq := mustAnthropicRequest(t, Model{ID: "claude"}, req, StreamOptions{})
 
 		if len(anthropicReq.System) > 0 && anthropicReq.System[len(anthropicReq.System)-1].CacheControl != nil {
 			t.Fatal("expected no cache_control on system prompt")
@@ -372,7 +372,7 @@ func TestConvertToAnthropicRequest_AdaptiveThinkingModels(t *testing.T) {
 			"claude-opus-4-8",
 			"claude-sonnet-4-6",
 		} {
-			anthropicReq := convertToAnthropicRequest(Model{ID: id}, req, StreamOptions{ThinkingLevel: ThinkingMedium})
+			anthropicReq := mustAnthropicRequest(t, Model{ID: id}, req, StreamOptions{ThinkingLevel: ThinkingMedium})
 
 			if anthropicReq.Thinking == nil || anthropicReq.Thinking.Type != "adaptive" {
 				t.Fatalf("%s: expected thinking type adaptive, got %+v", id, anthropicReq.Thinking)
@@ -390,7 +390,7 @@ func TestConvertToAnthropicRequest_AdaptiveThinkingModels(t *testing.T) {
 	})
 
 	t.Run("budget_tokens omitted from adaptive thinking JSON", func(t *testing.T) {
-		anthropicReq := convertToAnthropicRequest(Model{ID: "claude-sonnet-5"}, req, StreamOptions{ThinkingLevel: ThinkingMedium})
+		anthropicReq := mustAnthropicRequest(t, Model{ID: "claude-sonnet-5"}, req, StreamOptions{ThinkingLevel: ThinkingMedium})
 		body, err := json.Marshal(anthropicReq)
 		if err != nil {
 			t.Fatal(err)
@@ -408,7 +408,7 @@ func TestConvertToAnthropicRequest_AdaptiveThinkingModels(t *testing.T) {
 			ThinkingHigh:    "high",
 			ThinkingXHigh:   "xhigh",
 		} {
-			anthropicReq := convertToAnthropicRequest(Model{ID: "claude-sonnet-5"}, req, StreamOptions{ThinkingLevel: level})
+			anthropicReq := mustAnthropicRequest(t, Model{ID: "claude-sonnet-5"}, req, StreamOptions{ThinkingLevel: level})
 			if anthropicReq.OutputConfig == nil || anthropicReq.OutputConfig.Effort != want {
 				t.Fatalf("level %s: expected effort %q, got %+v", level, want, anthropicReq.OutputConfig)
 			}
@@ -417,7 +417,7 @@ func TestConvertToAnthropicRequest_AdaptiveThinkingModels(t *testing.T) {
 
 	t.Run("older models keep enabled thinking with budget", func(t *testing.T) {
 		for _, id := range []string{"claude-haiku-4-5", "claude-sonnet-4-5", "claude-opus-4-5", "claude"} {
-			anthropicReq := convertToAnthropicRequest(Model{ID: id}, req, StreamOptions{ThinkingLevel: ThinkingMedium})
+			anthropicReq := mustAnthropicRequest(t, Model{ID: id}, req, StreamOptions{ThinkingLevel: ThinkingMedium})
 
 			if anthropicReq.Thinking == nil || anthropicReq.Thinking.Type != "enabled" {
 				t.Fatalf("%s: expected thinking type enabled, got %+v", id, anthropicReq.Thinking)
@@ -435,7 +435,7 @@ func TestConvertToAnthropicRequest_AdaptiveThinkingModels(t *testing.T) {
 	})
 
 	t.Run("thinking off disables thinking and sends no output_config", func(t *testing.T) {
-		anthropicReq := convertToAnthropicRequest(Model{ID: "claude-sonnet-5"}, req, StreamOptions{ThinkingLevel: ThinkingOff})
+		anthropicReq := mustAnthropicRequest(t, Model{ID: "claude-sonnet-5"}, req, StreamOptions{ThinkingLevel: ThinkingOff})
 		if anthropicReq.Thinking == nil || anthropicReq.Thinking.Type != "disabled" {
 			t.Fatalf("expected thinking type disabled, got %+v", anthropicReq.Thinking)
 		}
@@ -516,7 +516,7 @@ func TestConvertToAnthropicRequest_ThinkingOff(t *testing.T) {
 		// A level still asks for thinking.
 		{"claude-sonnet-5", ThinkingLow, "adaptive"},
 	} {
-		req := convertToAnthropicRequest(
+		req := mustAnthropicRequest(t,
 			Model{ID: tc.model, API: APIAnthropicMessages},
 			Request{},
 			StreamOptions{ThinkingLevel: tc.level},
@@ -529,4 +529,22 @@ func TestConvertToAnthropicRequest_ThinkingOff(t *testing.T) {
 			t.Errorf("%s with thinking %q: type %q, want %q", tc.model, tc.level, got, tc.want)
 		}
 	}
+}
+
+// testCeiling is an arbitrary output ceiling for a model under test.
+const testCeiling = 5000
+
+// mustAnthropicRequest converts on behalf of tests that are about
+// something other than the output cap, standing in a ceiling for a
+// model that names none so the required max_tokens is satisfied.
+func mustAnthropicRequest(t *testing.T, model Model, req Request, opts StreamOptions) anthropicRequest {
+	t.Helper()
+	if model.MaxTokens == 0 && opts.MaxTokens == nil {
+		model.MaxTokens = testCeiling
+	}
+	out, err := convertToAnthropicRequest(model, req, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
 }

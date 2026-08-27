@@ -25,7 +25,7 @@ func TestStream_SetsUserAgentHeader(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	model := Model{ID: "m", API: APIAnthropicMessages, BaseURL: srv.URL}
+	model := Model{ID: "m", API: APIAnthropicMessages, BaseURL: srv.URL, MaxTokens: 1024}
 	_, err := Stream(context.Background(), model, Request{}, StreamOptions{UserAgent: "incrementum [v] repo"})
 	if err != nil {
 		t.Fatalf("Stream() error: %v", err)

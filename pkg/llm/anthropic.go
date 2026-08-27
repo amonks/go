@@ -16,15 +16,15 @@ const anthropicAPIVersion = "2023-06-01"
 
 // anthropicRequest is the request body for the Anthropic Messages API.
 type anthropicRequest struct {
-	Model       string             `json:"model"`
-	MaxTokens   int                `json:"max_tokens"`
-	Messages    []anthropicMessage `json:"messages"`
-	System      []anthropicContent `json:"system,omitempty"`
-	Stream      bool               `json:"stream"`
-	Tools       []anthropicTool      `json:"tools,omitempty"`
-	ToolChoice  *anthropicToolChoice `json:"tool_choice,omitempty"`
-	Temperature *float64             `json:"temperature,omitempty"`
-	Thinking    *anthropicThinking   `json:"thinking,omitempty"`
+	Model        string                 `json:"model"`
+	MaxTokens    int                    `json:"max_tokens"`
+	Messages     []anthropicMessage     `json:"messages"`
+	System       []anthropicContent     `json:"system,omitempty"`
+	Stream       bool                   `json:"stream"`
+	Tools        []anthropicTool        `json:"tools,omitempty"`
+	ToolChoice   *anthropicToolChoice   `json:"tool_choice,omitempty"`
+	Temperature  *float64               `json:"temperature,omitempty"`
+	Thinking     *anthropicThinking     `json:"thinking,omitempty"`
 	OutputConfig *anthropicOutputConfig `json:"output_config,omitempty"`
 }
 
@@ -119,8 +119,10 @@ type anthropicUsage struct {
 }
 
 func streamAnthropic(ctx context.Context, model Model, req Request, opts StreamOptions) (*StreamHandle, error) {
-	// Convert request to Anthropic format
-	anthropicReq := convertToAnthropicRequest(model, req, opts)
+	anthropicReq, err := convertToAnthropicRequest(model, req, opts)
+	if err != nil {
+		return nil, err
+	}
 
 	body, err := json.Marshal(anthropicReq)
 	if err != nil {
@@ -181,26 +183,28 @@ func streamAnthropic(ctx context.Context, model Model, req Request, opts StreamO
 	return newStreamHandle(events, done, errCh), nil
 }
 
-func convertToAnthropicRequest(model Model, req Request, opts StreamOptions) anthropicRequest {
+func convertToAnthropicRequest(model Model, req Request, opts StreamOptions) (anthropicRequest, error) {
 	anthropicReq := anthropicRequest{
 		Model:  model.ID,
 		Stream: true,
 		System: convertSystemBlocksToAnthropic(req.System),
-		Tools: make([]anthropicTool, 0, len(req.Tools)),
+		Tools:  make([]anthropicTool, 0, len(req.Tools)),
 	}
 
 	if len(req.System) == 0 {
 		anthropicReq.System = nil
 	}
 
-	// Set max tokens
-	if opts.MaxTokens != nil {
-		anthropicReq.MaxTokens = *opts.MaxTokens
-	} else if model.MaxTokens > 0 {
-		anthropicReq.MaxTokens = model.MaxTokens
-	} else {
-		anthropicReq.MaxTokens = 8192 // Default
+	// max_tokens is required here, and the package invents no value
+	// for it: the caller names one, or the model's ceiling stands in.
+	limit, err := opts.outputLimit(model)
+	if err != nil {
+		return anthropicRequest{}, err
 	}
+	if limit == 0 {
+		return anthropicRequest{}, fmt.Errorf("anthropic requires max_tokens: %s has no known output ceiling and the call set none", model.ID)
+	}
+	anthropicReq.MaxTokens = limit
 
 	// Set temperature
 	if opts.Temperature != nil {
@@ -261,7 +265,7 @@ func convertToAnthropicRequest(model Model, req Request, opts StreamOptions) ant
 
 	applyAnthropicCaching(&anthropicReq, req.System, opts.CacheRetention)
 
-	return anthropicReq
+	return anthropicReq, nil
 }
 
 func applyAnthropicCaching(req *anthropicRequest, blocks []SystemBlock, retention CacheRetention) {
@@ -552,7 +556,7 @@ func processAnthropicStream(ctx context.Context, body io.ReadCloser, model Model
 		case "message_start":
 			if event.Message != nil {
 				partial.Usage.Input = event.Message.Usage.InputTokens
-			partial.Usage.Output = event.Message.Usage.OutputTokens
+				partial.Usage.Output = event.Message.Usage.OutputTokens
 				partial.Usage.CacheRead = event.Message.Usage.CacheReadInputTokens
 				partial.Usage.CacheWrite = event.Message.Usage.CacheCreationInputTokens
 			}

@@ -30,7 +30,7 @@ func TestLogInvocationStart_DescribesRequest(t *testing.T) {
 	buf := captureLogOutput(t)
 
 	logInvocationStart(
-		Model{ID: "claude-sonnet-4-6", API: APIAnthropicMessages},
+		Model{ID: "claude-sonnet-4-6", API: APIAnthropicMessages, MaxTokens: 1024},
 		Request{
 			Tools:      []Tool{{Name: "recommend"}},
 			ToolChoice: "recommend",

@@ -173,12 +173,14 @@ func Stream(ctx context.Context, model Model, req Request, opts StreamOptions) (
 // happening and see their token usage and latency without a debugger.
 
 func logInvocationStart(model Model, req Request, opts StreamOptions) {
-	maxTokens := 0
-	if opts.MaxTokens != nil {
-		maxTokens = *opts.MaxTokens
+	maxTokens := "provider"
+	if limit, err := opts.outputLimit(model); err != nil {
+		maxTokens = "invalid"
+	} else if limit > 0 {
+		maxTokens = fmt.Sprint(limit)
 	}
 	toolChoice := opts.toolChoiceLabel(req)
-	log.Printf("llm: → %s (%s) maxTokens=%d tools=%s%s",
+	log.Printf("llm: → %s (%s) maxTokens=%s tools=%s%s",
 		model.ID, model.API, maxTokens, toolNames(req.Tools), toolChoice)
 }
 

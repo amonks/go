@@ -104,7 +104,10 @@ type openAIUsage struct {
 }
 
 func streamOpenAICompletions(ctx context.Context, model Model, req Request, opts StreamOptions) (*StreamHandle, error) {
-	openAIReq := convertToOpenAIRequest(model, req, opts)
+	openAIReq, err := convertToOpenAIRequest(model, req, opts)
+	if err != nil {
+		return nil, err
+	}
 
 	body, err := json.Marshal(openAIReq)
 	if err != nil {
@@ -161,27 +164,24 @@ func streamOpenAICompletions(ctx context.Context, model Model, req Request, opts
 	return newStreamHandle(events, done, errCh), nil
 }
 
-func convertToOpenAIRequest(model Model, req Request, opts StreamOptions) openAICompletionsRequest {
+func convertToOpenAIRequest(model Model, req Request, opts StreamOptions) (openAICompletionsRequest, error) {
 	openAIReq := openAICompletionsRequest{
 		Model:         model.ID,
 		Stream:        true,
 		StreamOptions: &openAIStreamOptions{IncludeUsage: true},
 	}
 
-	// Set max tokens
-	// OpenAI reasoning models (o1, o3, o4) require max_completion_tokens instead of max_tokens
+	// The field is optional here — omitted (0), the provider applies
+	// its own default. Reasoning models (o1, o3, o4) take
+	// max_completion_tokens instead of max_tokens.
+	limit, err := opts.outputLimit(model)
+	if err != nil {
+		return openAICompletionsRequest{}, err
+	}
 	if model.UseMaxCompletionTokens {
-		if opts.MaxTokens != nil {
-			openAIReq.MaxCompletionTokens = *opts.MaxTokens
-		} else if model.MaxTokens > 0 {
-			openAIReq.MaxCompletionTokens = model.MaxTokens
-		}
+		openAIReq.MaxCompletionTokens = limit
 	} else {
-		if opts.MaxTokens != nil {
-			openAIReq.MaxTokens = *opts.MaxTokens
-		} else if model.MaxTokens > 0 {
-			openAIReq.MaxTokens = model.MaxTokens
-		}
+		openAIReq.MaxTokens = limit
 	}
 
 	// Set temperature
@@ -212,7 +212,7 @@ func convertToOpenAIRequest(model Model, req Request, opts StreamOptions) openAI
 		}
 	}
 
-	return openAIReq
+	return openAIReq, nil
 }
 
 func convertMessagesToOpenAI(systemBlocks []SystemBlock, messages []Message) []openAIMessage {
@@ -572,7 +572,10 @@ type responsesUsage struct {
 
 // streamOpenAIResponses implements the OpenAI Responses API streaming.
 func streamOpenAIResponses(ctx context.Context, model Model, req Request, opts StreamOptions) (*StreamHandle, error) {
-	responsesReq := convertToResponsesRequest(model, req, opts)
+	responsesReq, err := convertToResponsesRequest(model, req, opts)
+	if err != nil {
+		return nil, err
+	}
 
 	body, err := json.Marshal(responsesReq)
 	if err != nil {
@@ -628,18 +631,18 @@ func streamOpenAIResponses(ctx context.Context, model Model, req Request, opts S
 	return newStreamHandle(events, done, errCh), nil
 }
 
-func convertToResponsesRequest(model Model, req Request, opts StreamOptions) responsesAPIRequest {
+func convertToResponsesRequest(model Model, req Request, opts StreamOptions) (responsesAPIRequest, error) {
 	responsesReq := responsesAPIRequest{
 		Model:  model.ID,
 		Stream: true,
 	}
 
-	// Set max output tokens
-	if opts.MaxTokens != nil {
-		responsesReq.MaxOutputTokens = *opts.MaxTokens
-	} else if model.MaxTokens > 0 {
-		responsesReq.MaxOutputTokens = model.MaxTokens
+	// Optional here; omitted, the provider applies its own default.
+	limit, err := opts.outputLimit(model)
+	if err != nil {
+		return responsesAPIRequest{}, err
 	}
+	responsesReq.MaxOutputTokens = limit
 
 	// Set temperature
 	if opts.Temperature != nil {
@@ -669,7 +672,7 @@ func convertToResponsesRequest(model Model, req Request, opts StreamOptions) res
 		responsesReq.ToolChoice = map[string]any{"type": "function", "name": req.ToolChoice}
 	}
 
-	return responsesReq
+	return responsesReq, nil
 }
 
 func convertMessagesToResponsesInput(messages []Message) any {
