@@ -184,6 +184,22 @@ func browserDocument(t *testing.T) string {
 	if err := Table(plain, rows[:3]).Render(context.Background(), &out); err != nil {
 		t.Fatal(err)
 	}
+	out.WriteString(`</section><section class="preview-card" style="max-width:920px;margin-top:28px"><h2>Default sort</h2>`)
+	ranked := browserOptions("ranked")
+	ranked.Columns = []Column[browserPerson]{ranked.Columns[0], ranked.Columns[4]}
+	ranked.InitialState = State{Sort: "score", Descending: true}
+	rankedRows := slices.Clone(rows[:6])
+	slices.SortStableFunc(rankedRows, func(a, b browserPerson) int { return cmp.Compare(b.Score, a.Score) })
+	if err := Table(ranked, rankedRows).Render(context.Background(), &out); err != nil {
+		t.Fatal(err)
+	}
+	out.WriteString(`</section><section class="preview-card" style="max-width:920px;margin-top:28px"><h2>Default filter</h2>`)
+	scoped := browserOptions("scoped")
+	scoped.Columns = scoped.Columns[:2]
+	scoped.InitialState = State{Filters: map[string][]string{"team": {"Research"}}}
+	if err := Table(scoped, rows[:6]).Render(context.Background(), &out); err != nil {
+		t.Fatal(err)
+	}
 	out.WriteString(`</section></body></html>`)
 	return out.String()
 }
@@ -202,7 +218,7 @@ func navigateReady(t *testing.T, ctx context.Context, target string) {
 	if err := chromedp.Run(ctx,
 		chromedp.EmulateViewport(1440, 1000),
 		browsertest.Step("open "+target, chromedp.Navigate(target)),
-		chromedp.Poll(`document.querySelectorAll("monks-datagrid[data-dg-ready]").length === 3`, nil,
+		chromedp.Poll(`document.querySelectorAll("monks-datagrid[data-dg-ready]").length === 5`, nil,
 			browsertest.PollTimeout),
 	); err != nil {
 		t.Fatalf("open datagrid fixture: %v", err)
@@ -1690,5 +1706,145 @@ func TestPreviewServe(t *testing.T) {
 	}
 	if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 		t.Fatal(err)
+	}
+}
+
+// A grid that declares an initial sort starts there — header marked,
+// URL clean, no clear control — and every path leads back to it: the
+// sort cycle's last step restores the declared sort instead of
+// clearing to unsorted, the declared column toggles direction, and
+// Reset returns the whole grid to its initial state.
+func TestBrowserDefaultSortCycleRestoresInitialState(t *testing.T) {
+	server := browserServer(t)
+	defer server.Close()
+	ctx := browsertest.NewBrowser(t)
+	navigateReady(t, ctx, server.URL)
+
+	type snapshot struct {
+		First       string `json:"first"`
+		ScoreAria   string `json:"scoreAria"`
+		NameAria    string `json:"nameAria"`
+		NameLabel   string `json:"nameLabel"`
+		ClearHidden bool   `json:"clearHidden"`
+		Query       string `json:"query"`
+	}
+	var got struct {
+		Initial       snapshot `json:"initial"`
+		ScoreToggled  snapshot `json:"scoreToggled"`
+		ScoreRestored snapshot `json:"scoreRestored"`
+		NameAsc       snapshot `json:"nameAsc"`
+		NameDesc      snapshot `json:"nameDesc"`
+		Restored      snapshot `json:"restored"`
+		Searched      snapshot `json:"searched"`
+		Cleared       snapshot `json:"cleared"`
+	}
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
+		const grid = document.querySelector('#ranked');
+		const snap = () => ({
+			first: grid.querySelector('tr[data-dg-row]:not([hidden])').dataset.dgRowId,
+			scoreAria: grid.querySelector('th[data-dg-column="score"]').getAttribute('aria-sort') || '',
+			nameAria: grid.querySelector('th[data-dg-column="name"]').getAttribute('aria-sort') || '',
+			nameLabel: grid.querySelector('th[data-dg-column="name"] [data-dg-role="sort"]').getAttribute('aria-label') || '',
+			clearHidden: grid.querySelector('[data-dg-role="clear"]').hidden,
+			query: window.location.search,
+		});
+		const click = (column) =>
+			grid.querySelector('th[data-dg-column="' + column + '"] [data-dg-role="sort"]').click();
+		const out = { initial: snap() };
+		click('score'); out.scoreToggled = snap();
+		click('score'); out.scoreRestored = snap();
+		click('name'); out.nameAsc = snap();
+		click('name'); out.nameDesc = snap();
+		click('name'); out.restored = snap();
+		grid.setState({...grid.getState(), search: 'ada'});
+		out.searched = snap();
+		grid.querySelector('[data-dg-role="clear"]').click();
+		out.cleared = snap();
+		return out;
+	})()`, &got)); err != nil {
+		t.Fatal(err)
+	}
+
+	atDefault := func(name string, s snapshot) {
+		t.Helper()
+		if s.First != "person-02" || s.ScoreAria != "descending" || s.NameAria != "" ||
+			!s.ClearHidden || strings.Contains(s.Query, "dg.ranked") {
+			t.Errorf("%s not at the declared initial state: %#v", name, s)
+		}
+	}
+	atDefault("initial", got.Initial)
+	if got.ScoreToggled.ScoreAria != "ascending" || got.ScoreToggled.First != "person-00" ||
+		got.ScoreToggled.ClearHidden ||
+		!strings.Contains(got.ScoreToggled.Query, "dg.ranked.sort=score") ||
+		!strings.Contains(got.ScoreToggled.Query, "dg.ranked.dir=asc") {
+		t.Errorf("declared column did not toggle direction: %#v", got.ScoreToggled)
+	}
+	atDefault("scoreRestored", got.ScoreRestored)
+	if got.NameAsc.NameAria != "ascending" || got.NameAsc.First != "person-00" || got.NameAsc.ScoreAria != "" {
+		t.Errorf("name ascending = %#v", got.NameAsc)
+	}
+	if got.NameDesc.NameAria != "descending" || got.NameDesc.First != "person-03" ||
+		got.NameDesc.NameLabel != "Name: restore default sort" {
+		t.Errorf("name descending = %#v", got.NameDesc)
+	}
+	atDefault("restored", got.Restored)
+	if got.Searched.ClearHidden {
+		t.Errorf("search did not surface the clear control: %#v", got.Searched)
+	}
+	atDefault("cleared", got.Cleared)
+}
+
+// A grid with a declared initial filter starts with it applied and the
+// reset control hidden — the bare page is not an "active" state — and
+// Reset returns to that filter rather than to an absolute nothing,
+// which would reveal rows the bare page never shows.
+func TestBrowserDefaultFilterIsTheResetBaseline(t *testing.T) {
+	server := browserServer(t)
+	defer server.Close()
+	ctx := browsertest.NewBrowser(t)
+	navigateReady(t, ctx, server.URL)
+
+	type snapshot struct {
+		Rows        []string `json:"rows"`
+		ClearHidden bool     `json:"clearHidden"`
+		Query       string   `json:"query"`
+	}
+	var got struct {
+		Initial  snapshot `json:"initial"`
+		Deviated snapshot `json:"deviated"`
+		Reset    snapshot `json:"reset"`
+		Label    string   `json:"label"`
+	}
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
+		const grid = document.querySelector('#scoped');
+		const snap = () => ({
+			rows: [...grid.querySelectorAll('tr[data-dg-row]:not([hidden])')].map(r => r.dataset.dgRowId),
+			clearHidden: grid.querySelector('[data-dg-role="clear"]').hidden,
+			query: window.location.search,
+		});
+		const out = { initial: snap(), label: grid.querySelector('[data-dg-role="clear"]').textContent.trim() };
+		grid.setState({...grid.getState(), filters: {team: ['Navy']}});
+		out.deviated = snap();
+		grid.querySelector('[data-dg-role="clear"]').click();
+		out.reset = snap();
+		return out;
+	})()`, &got)); err != nil {
+		t.Fatal(err)
+	}
+
+	if !slices.Equal(got.Initial.Rows, []string{"person-00", "person-03"}) ||
+		!got.Initial.ClearHidden || strings.Contains(got.Initial.Query, "dg.scoped") {
+		t.Errorf("initial state should be the declared filter with no reset offered: %#v", got.Initial)
+	}
+	if !slices.Equal(got.Deviated.Rows, []string{"person-01", "person-04"}) ||
+		got.Deviated.ClearHidden || !strings.Contains(got.Deviated.Query, "dg.scoped.filter.team=Navy") {
+		t.Errorf("deviated state = %#v", got.Deviated)
+	}
+	if !slices.Equal(got.Reset.Rows, []string{"person-00", "person-03"}) ||
+		!got.Reset.ClearHidden || strings.Contains(got.Reset.Query, "dg.scoped") {
+		t.Errorf("reset did not restore the declared filter: %#v", got.Reset)
+	}
+	if got.Label != "Reset" {
+		t.Errorf("control label = %q, want Reset", got.Label)
 	}
 }

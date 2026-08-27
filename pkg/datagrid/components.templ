@@ -76,7 +76,10 @@ templ Controls(props ShellProps) {
 			}
 			if props.Disabled&FeatureFilters == 0 {
 				@FilterControls(ControlProps{GridID: props.ID})
-				<button type="button" class="datagrid-clear-all" data-dg-role="clear" hidden>Clear all</button>
+				// Reset, not "Clear all": the control returns the grid to its
+				// declared initial state, which for a grid with a default sort
+				// or filter is not an absolute nothing.
+				<button type="button" class="datagrid-clear-all" data-dg-role="clear" hidden>Reset</button>
 			}
 		}
 		if props.Extra != nil {

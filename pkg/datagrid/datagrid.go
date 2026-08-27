@@ -131,9 +131,16 @@ type Options[T any] struct {
 	// is a caller decision made here, not user-adjustable state.
 	PageSize          int
 	FilterTypeaheadAt int
-	InitialState      State
-	Disabled          Feature
-	QueryPrefix       string
+	// InitialState is the state the grid starts in and returns to: the codec
+	// elides it from the URL, a column's sort cycle ends by restoring its sort
+	// (a grid that declares none clears to unsorted), and the Reset control
+	// resets to it whole. A grid that declares an initial sort must serve its rows
+	// already in that order — the table renders rows as given while marking
+	// that column's header sorted from the first paint, so the markup must not
+	// claim an order it doesn't have.
+	InitialState State
+	Disabled     Feature
+	QueryPrefix  string
 	// ClientHooks is an ordered comma- or whitespace-separated list registered
 	// through window.Datagrid.register.
 	ClientHooks string

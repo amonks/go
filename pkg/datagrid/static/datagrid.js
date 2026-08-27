@@ -125,17 +125,18 @@
   }
 
   function statesEqual(a, b) {
-    if (
-      a.search !== b.search ||
-      a.sort !== b.sort ||
-      a.descending !== b.descending ||
-      a.page !== b.page
-    ) {
-      return false;
-    }
+    return (
+      a.search === b.search &&
+      a.sort === b.sort &&
+      a.descending === b.descending &&
+      a.page === b.page &&
+      filtersEqual(a.filters, b.filters)
+    );
+  }
 
-    const aKeys = Object.keys(a.filters).sort(compareCanonicalStrings);
-    const bKeys = Object.keys(b.filters).sort(compareCanonicalStrings);
+  function filtersEqual(a, b) {
+    const aKeys = Object.keys(a).sort(compareCanonicalStrings);
+    const bKeys = Object.keys(b).sort(compareCanonicalStrings);
     if (aKeys.length !== bKeys.length) {
       return false;
     }
@@ -143,8 +144,8 @@
       if (aKeys[index] !== bKeys[index]) {
         return false;
       }
-      const aValues = a.filters[aKeys[index]];
-      const bValues = b.filters[bKeys[index]];
+      const aValues = a[aKeys[index]];
+      const bValues = b[bKeys[index]];
       if (
         aValues.length !== bValues.length ||
         aValues.some((value, valueIndex) => value !== bValues[valueIndex])
@@ -546,6 +547,30 @@
         descending: sort !== "" && Boolean(candidate.descending),
         page: this._features.has("pagination") ? page : 1,
       };
+    }
+
+    // _sortCycle is the sort a click on this column's header produces
+    // next. The cycle ends where the grid began: a column's third click
+    // restores the initial sort (or clears to unsorted when the grid
+    // declared none), and the initial sort's own column just toggles
+    // direction — entered from elsewhere at its initial direction —
+    // since restoring what is already shown would be a dead click.
+    _sortCycle(columnKey) {
+      const state = this._state;
+      const defaults = this._defaults;
+      if (state.sort !== columnKey) {
+        return {
+          sort: columnKey,
+          descending: columnKey === defaults.sort && defaults.descending,
+        };
+      }
+      if (columnKey === defaults.sort) {
+        return { sort: columnKey, descending: !state.descending };
+      }
+      if (!state.descending) {
+        return { sort: columnKey, descending: true };
+      }
+      return { sort: defaults.sort, descending: defaults.descending };
     }
 
     _collectRows() {
@@ -1063,16 +1088,14 @@
         if (column.sortButton) {
           column.sortButton.disabled = !column.sortable;
           if (column.sortable) {
-            const nextDirection = this._state.sort !== column.key
-              ? "ascending"
-              : this._state.descending
-                ? "none"
-                : "descending";
+            const step = this._sortCycle(column.key);
             column.sortButton.setAttribute(
               "aria-label",
-              nextDirection === "none"
-                ? `${column.label}: clear sorting`
-                : `${column.label}: sort ${nextDirection}`,
+              step.sort === column.key
+                ? `${column.label}: sort ${step.descending ? "descending" : "ascending"}`
+                : step.sort === ""
+                  ? `${column.label}: clear sorting`
+                  : `${column.label}: restore default sort`,
             );
           }
         }
@@ -1092,10 +1115,15 @@
         checkbox.checked = (this._state.filters[column] || []).includes(checkbox.value);
       }
 
+      // Active means "not how the grid began": a grid with a declared
+      // initial sort shows no clear control until the state departs
+      // from it. Page is excluded, as paging was never clearable.
+      const defaults = this._defaults;
       const active =
-        this._state.search !== "" ||
-        this._state.sort !== "" ||
-        Object.keys(this._state.filters).length > 0;
+        this._state.search !== defaults.search ||
+        this._state.sort !== defaults.sort ||
+        this._state.descending !== defaults.descending ||
+        !filtersEqual(this._state.filters, defaults.filters);
       this.setAttribute("data-dg-has-active-state", String(active));
       for (const clear of this._findAllOwned('[data-dg-role="clear"]')) {
         clear.disabled = !active;
@@ -1445,28 +1473,21 @@
         }
         const next = this.getState();
         next.page = 1;
-        if (next.sort !== column) {
-          next.sort = column;
-          next.descending = false;
-        } else if (!next.descending) {
-          next.descending = true;
-        } else {
-          next.sort = "";
-          next.descending = false;
-        }
+        Object.assign(next, this._sortCycle(column));
         this._setState(next, { emit: true, writeQuery: true, renderUnknowns: false });
         return;
       }
 
       const clear = target.closest('[data-dg-role="clear"]');
       if (clear && this._owns(clear)) {
-        this._setState({
-          search: "",
-          filters: {},
-          sort: "",
-          descending: false,
-          page: 1,
-        }, { emit: true, writeQuery: true, renderUnknowns: false });
+        // Clearing restores the grid's declared initial state — not an
+        // absolute nothing, which for a grid with an initial sort would
+        // be a state the bare page never shows.
+        this._setState(cloneState(this._defaults), {
+          emit: true,
+          writeQuery: true,
+          renderUnknowns: false,
+        });
         return;
       }
 
