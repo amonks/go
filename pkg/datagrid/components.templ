@@ -38,6 +38,9 @@ templ Shell(props ShellProps) {
 		if props.Theme != ThemeAuto {
 			data-dg-theme={ string(props.Theme) }
 		}
+		if props.Panel != PanelAuto {
+			data-dg-panel={ string(props.Panel) }
+		}
 	>
 		<div class="datagrid-layout">
 			if hasPanel(props) {

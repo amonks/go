@@ -60,10 +60,20 @@ const (
 // document's scheme, including any OS preference the document advertises.
 type Theme string
 
+// Panel places one grid's controls. PanelAuto is the container query's
+// choice: a side rail when the grid is wide, a top bar when it is
+// narrow. PanelTop keeps the top bar at every width, for a table whose
+// columns want the width more than its two facets want a column of
+// their own.
+type Panel string
+
 const (
 	ThemeAuto  Theme = ""
 	ThemeLight Theme = "light"
 	ThemeDark  Theme = "dark"
+
+	PanelAuto Panel = ""
+	PanelTop  Panel = "top"
 )
 
 // FilterValue separates the stable query-string value from its human label.
@@ -128,6 +138,7 @@ type Options[T any] struct {
 	// through window.Datagrid.register.
 	ClientHooks string
 	Theme       Theme
+	Panel       Panel
 
 	RowID         func(T) string
 	RowClass      func(T) string
@@ -162,6 +173,7 @@ type ShellProps struct {
 	QueryPrefix       string
 	ClientHooks       string
 	Theme             Theme
+	Panel             Panel
 	// InitialRows is the number of rows present in the caller-owned table at
 	// render time. It drives the progressive, pre-upgrade summary and empty
 	// state; callers that later replace or append rows call element.refresh().
@@ -288,6 +300,7 @@ func makeTableView[T any](opts Options[T], rows []T, extra templ.Component) (tab
 			QueryPrefix:       settings.queryPrefix,
 			ClientHooks:       opts.ClientHooks,
 			Theme:             opts.Theme,
+			Panel:             opts.Panel,
 			InitialRows:       len(rows),
 			ControlPanel:      opts.ControlPanel,
 			Extra:             extra,
@@ -472,6 +485,9 @@ func validateOptions[T any](opts Options[T]) error {
 	}
 	if opts.Theme != ThemeAuto && opts.Theme != ThemeLight && opts.Theme != ThemeDark {
 		return fmt.Errorf("unknown Theme %q", opts.Theme)
+	}
+	if opts.Panel != PanelAuto && opts.Panel != PanelTop {
+		return fmt.Errorf("unknown Panel %q", opts.Panel)
 	}
 	seen := make(map[string]struct{}, len(opts.Columns))
 	for index, column := range opts.Columns {

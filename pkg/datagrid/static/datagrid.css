@@ -659,8 +659,11 @@ monks-datagrid:not([data-dg-ready]) .datagrid-sort:disabled {
   opacity: 1;
 }
 
+/* The side rail: a grid wide enough for it puts its controls beside
+   the table — unless the grid asked for the top bar at every width
+   (data-dg-panel="top"), which every rule here yields to. */
 @container datagrid (min-width: 52rem) {
-  monks-datagrid .datagrid-layout:has(
+  monks-datagrid:not([data-dg-panel="top"]) .datagrid-layout:has(
     > .datagrid-panel > .datagrid-search-wrap:not([hidden]),
     > .datagrid-panel .datagrid-filter,
     > .datagrid-panel > .datagrid-control-override:not(:empty),
@@ -671,7 +674,7 @@ monks-datagrid:not([data-dg-ready]) .datagrid-sort:disabled {
     gap: 1rem;
   }
 
-  monks-datagrid .datagrid-panel {
+  monks-datagrid:not([data-dg-panel="top"]) .datagrid-panel {
     position: sticky;
     inset-block-start: 0.75rem;
     display: flex;
@@ -682,57 +685,57 @@ monks-datagrid:not([data-dg-ready]) .datagrid-sort:disabled {
     min-inline-size: 0;
   }
 
-  monks-datagrid .datagrid-search-wrap {
+  monks-datagrid:not([data-dg-panel="top"]) .datagrid-search-wrap {
     flex: 0 0 auto;
     min-inline-size: 0;
     inline-size: 100%;
   }
 
-  monks-datagrid .datagrid-generated-filters {
+  monks-datagrid:not([data-dg-panel="top"]) .datagrid-generated-filters {
     display: flex;
     flex-direction: column;
     gap: 0.45rem;
     inline-size: 100%;
   }
 
-  monks-datagrid .datagrid-filter {
+  monks-datagrid:not([data-dg-panel="top"]) .datagrid-filter {
     inline-size: 100%;
   }
 
-  monks-datagrid .datagrid-filter > summary {
+  monks-datagrid:not([data-dg-panel="top"]) .datagrid-filter > summary {
     inline-size: 100%;
     max-inline-size: none;
   }
 
-  monks-datagrid .datagrid-filter-options {
+  monks-datagrid:not([data-dg-panel="top"]) .datagrid-filter-options {
     inline-size: min(19rem, calc(100cqi - 2rem));
   }
 
-  monks-datagrid .datagrid-filter-search {
+  monks-datagrid:not([data-dg-panel="top"]) .datagrid-filter-search {
     inline-size: min(18.1rem, calc(100cqi - 2.9rem));
   }
 
-  monks-datagrid .datagrid-filter:last-of-type > .datagrid-filter-options {
+  monks-datagrid:not([data-dg-panel="top"]) .datagrid-filter:last-of-type > .datagrid-filter-options {
     inset-inline: 0 auto;
   }
 
-  monks-datagrid .datagrid-filter:last-of-type > .datagrid-filter-search {
+  monks-datagrid:not([data-dg-panel="top"]) .datagrid-filter:last-of-type > .datagrid-filter-search {
     inset-inline: 0.45rem auto;
   }
 
-  monks-datagrid .datagrid-clear-all,
-  monks-datagrid .datagrid-filter-clear {
+  monks-datagrid:not([data-dg-panel="top"]) .datagrid-clear-all,
+  monks-datagrid:not([data-dg-panel="top"]) .datagrid-filter-clear {
     align-self: flex-start;
   }
 
-  monks-datagrid .datagrid-control-override,
-  monks-datagrid .datagrid-extra {
+  monks-datagrid:not([data-dg-panel="top"]) .datagrid-control-override,
+  monks-datagrid:not([data-dg-panel="top"]) .datagrid-extra {
     flex: 0 0 auto;
     inline-size: 100%;
     padding-block-start: 0.25rem;
   }
 
-  monks-datagrid .datagrid-layout:has(
+  monks-datagrid:not([data-dg-panel="top"]) .datagrid-layout:has(
     > .datagrid-panel > .datagrid-search-wrap:not([hidden]),
     > .datagrid-panel .datagrid-filter,
     > .datagrid-panel > .datagrid-control-override:not(:empty),

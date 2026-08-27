@@ -470,6 +470,15 @@ func TestTableValidation(t *testing.T) {
 			want: "Text",
 		},
 		{
+			name: "unknown panel",
+			opts: Options[string]{
+				ID:      "grid",
+				Columns: []Column[string]{TextColumn("value", "Value", func(value string) string { return value })},
+				Panel:   Panel("sideways"),
+			},
+			want: "Panel",
+		},
+		{
 			name: "unknown initial sort",
 			opts: Options[string]{
 				ID:           "grid",
@@ -487,6 +496,23 @@ func TestTableValidation(t *testing.T) {
 				t.Fatalf("error = %v, want it to contain %q", err, tt.want)
 			}
 		})
+	}
+}
+
+// A grid that asks for the top bar says so on its host element, which is
+// what the stylesheet's rail rules yield to; the default says nothing.
+func TestTablePanelAttribute(t *testing.T) {
+	column := TextColumn("value", "Value", func(value string) string { return value })
+	auto := renderComponent(t, Table(Options[string]{ID: "grid", Columns: []Column[string]{column}}, []string{"x"}))
+	if strings.Contains(auto, "data-dg-panel") {
+		t.Fatalf("the default panel should carry no attribute:\n%s", auto)
+	}
+	top := renderComponent(t, Table(Options[string]{ID: "grid", Columns: []Column[string]{column}, Panel: PanelTop}, []string{"x"}))
+	if !strings.Contains(top, `data-dg-panel="top"`) {
+		t.Fatalf("PanelTop should stamp data-dg-panel on the host:\n%s", top)
+	}
+	if !strings.Contains(renderComponent(t, StyleForDocumentHead()), `monks-datagrid:not([data-dg-panel="top"]) .datagrid-panel`) {
+		t.Fatal("the rail rules should yield to data-dg-panel=\"top\"")
 	}
 }
 
