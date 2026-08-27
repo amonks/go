@@ -451,10 +451,18 @@ monks-datagrid .datagrid-table td {
    a form: at the host chrome's form size it is the tallest thing in the
    row and sets every row's height, and its side padding is width every
    other column wants. Every control the chrome dresses as a button, in
-   a td or a declared row header. The selector weighs one class, so it
-   outranks the chrome's bare `button` rule and yields to any class an
-   app puts on a particular button. */
-:where(monks-datagrid .datagrid-table tbody :is(td, th)) :is(button, .button, input[type="submit"], input[type="button"], input[type="reset"]) {
+   a td or a declared row header. The cell scope sits in :where() so the
+   scope weighs only the element, and the controls are a selector list
+   rather than one :is() — :is() weighs its heaviest arm, which would
+   make a bare button weigh a class — so each arm weighs exactly one
+   element more than opsui's rule for the same control: enough to beat
+   it by weight wherever this sheet lands, and no more, so a bare button
+   still yields to any class an app puts on it, and the other arms to
+   what outranks the chrome's rule plus that element. A host whose own
+   control rule weighs more than opsui's keeps it. */
+monks-datagrid :where(.datagrid-table tbody :is(td, th)) button,
+monks-datagrid :where(.datagrid-table tbody :is(td, th)) .button,
+monks-datagrid :where(.datagrid-table tbody :is(td, th)) input:is([type="submit"], [type="button"], [type="reset"]) {
   padding: 0 0.5rem;
   font-size: 0.75rem;
   line-height: 1.4;
