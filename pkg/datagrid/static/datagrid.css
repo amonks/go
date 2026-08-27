@@ -447,6 +447,19 @@ monks-datagrid .datagrid-table td {
   white-space: nowrap;
 }
 
+/* A button in a body cell — a row's verb — is sized to the row, not to
+   a form: at the host chrome's form size it is the tallest thing in the
+   row and sets every row's height, and its side padding is width every
+   other column wants. Every control the chrome dresses as a button, in
+   a td or a declared row header. The selector weighs one class, so it
+   outranks the chrome's bare `button` rule and yields to any class an
+   app puts on a particular button. */
+:where(monks-datagrid .datagrid-table tbody :is(td, th)) :is(button, .button, input[type="submit"], input[type="button"], input[type="reset"]) {
+  padding: 0 0.5rem;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
 monks-datagrid .datagrid-table thead th {
   position: static;
   padding-block: 0.25rem;
