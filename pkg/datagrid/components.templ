@@ -16,7 +16,7 @@ templ StyleForDocumentHead() {
 
 // ScriptForDocumentHead renders only the embedded custom-element script.
 templ ScriptForDocumentHead() {
-	@templ.Raw("<script id=\"monks-datagrid-script\">" + javascript + "</script>")
+	@templ.Raw("<script id=\"monks-datagrid-script\"" + nonceAttr(ctx) + ">" + javascript + "</script>")
 }
 
 // Shell renders the common controls, responsive frame, status, empty state,
