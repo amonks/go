@@ -1,0 +1,141 @@
+package localtime
+
+import "time"
+
+// Stamp renders t as a <time> the viewer's browser rewrites into their
+// own zone. A zero time renders nothing: what stands in for "never"
+// or "not yet" is the page's wording, not this package's.
+templ Stamp(t time.Time, p Precision) {
+	if !t.IsZero() {
+		<time datetime={ Attr(t) } data-localtime={ string(p) }>{ Fallback(t, p) }</time>
+	}
+}
+
+// Titled renders its children — a relative "3m ago", a status word —
+// inside a <time> whose title is the absolute instant, local to the
+// viewer. A zero time renders the children bare.
+templ Titled(t time.Time, p Precision) {
+	if t.IsZero() {
+		{ children... }
+	} else {
+		<time datetime={ Attr(t) } data-localtime-title={ string(p) } title={ Fallback(t, p) }>
+			{ children... }
+		</time>
+	}
+}
+
+// Script is the rewriter, rendered once per page in its head — before
+// the body, so a stamp is converted as the parser inserts it rather
+// than after the page has painted it in UTC. (A network chunk
+// boundary can land between a <time>'s start tag and its text, in
+// which case the parser appends the UTC text after the converted one
+// and the next mutation record heals it; rare, and a frame long.) A
+// second rendering on one page — a component's chrome and its
+// embedder's — is a no-op, so the observer is never doubled. It also
+// leaves the formatter on the window as MonksLocalTime, so a page
+// that draws its own stamps (an SSE-updated run, a query surface's
+// event table) renders them in the same shape:
+//
+//	MonksLocalTime.format(date, "minute")  →  "2026-08-28 14:05 PDT"
+//	MonksLocalTime.zone(date)              →  "PDT" — the zone's name at that
+//	                                          instant (now, when omitted), so a
+//	                                          tick across a DST change is named
+//	                                          for its own side of it
+//	MonksLocalTime.apply(root)             →  convert the stamps under root now
+//
+// The layout renders it; an app with a layout of its own renders it in
+// that layout's head.
+templ Script() {
+	<script id="monks-localtime-script" if templ.GetNonce(ctx) != "" { nonce={ templ.GetNonce(ctx) } }>
+		(function () {
+			if (window.MonksLocalTime) return;
+			var SELECTOR = 'time[datetime][data-localtime],time[datetime][data-localtime-title]';
+			var formatters = {};
+			function formatter(precision) {
+				if (!formatters[precision]) {
+					var opts = { year: 'numeric', month: '2-digit', day: '2-digit' };
+					if (precision !== 'day') {
+						opts.hour = '2-digit';
+						opts.minute = '2-digit';
+						opts.hourCycle = 'h23';
+						opts.timeZoneName = 'short';
+					}
+					if (precision === 'second' || precision === 'millisecond') opts.second = '2-digit';
+					if (precision === 'millisecond') opts.fractionalSecondDigits = 3;
+					formatters[precision] = new Intl.DateTimeFormat(undefined, opts);
+				}
+				return formatters[precision];
+			}
+			function format(at, precision) {
+				var d = at instanceof Date ? at : new Date(at);
+				if (isNaN(d.getTime())) return '';
+				var p = {};
+				formatter(precision).formatToParts(d).forEach(function (part) { p[part.type] = part.value; });
+				var text = p.year + '-' + p.month + '-' + p.day;
+				if (precision === 'day') return text;
+				text += ' ' + p.hour + ':' + p.minute;
+				if (precision === 'second' || precision === 'millisecond') text += ':' + p.second;
+				if (precision === 'millisecond') text += '.' + p.fractionalSecond;
+				return text + ' ' + p.timeZoneName;
+			}
+			function zone(at) {
+				var d = at == null ? new Date() : at instanceof Date ? at : new Date(at);
+				if (isNaN(d.getTime())) return '';
+				var name = '';
+				formatter('minute').formatToParts(d).forEach(function (part) {
+					if (part.type === 'timeZoneName') name = part.value;
+				});
+				return name;
+			}
+			function convert(el) {
+				var d = new Date(el.getAttribute('datetime'));
+				if (isNaN(d.getTime())) return;
+				var precision = el.dataset.localtime;
+				if (precision) {
+					var text = format(d, precision);
+					if (el.textContent !== text) el.textContent = text;
+				}
+				var titled = el.dataset.localtimeTitle;
+				if (titled) {
+					var title = format(d, titled);
+					if (el.title !== title) el.title = title;
+				}
+			}
+			function apply(root) {
+				if (root.matches && root.matches(SELECTOR)) convert(root);
+				if (root.querySelectorAll) root.querySelectorAll(SELECTOR).forEach(convert);
+			}
+			new MutationObserver(function (records) {
+				records.forEach(function (r) {
+					var el = r.target.nodeType === 1 ? r.target : r.target.parentElement;
+					var host = el && el.closest(SELECTOR);
+					if (host) convert(host);
+					r.addedNodes.forEach(apply);
+				});
+			}).observe(document.documentElement, { childList: true, subtree: true });
+			apply(document);
+			window.MonksLocalTime = { format: format, zone: zone, apply: apply };
+		})();
+	</script>
+}
+
+// Ago renders t relative to now — "3m ago" — with the local instant
+// as its title; an instant past the horizon renders as its date, the
+// time of day still in the title. A zero time renders nothing.
+templ Ago(t time.Time) {
+	@AgoAt(time.Now(), t)
+}
+
+// AgoAt is Ago with the clock supplied, for a page that renders many
+// stamps against one reading of now, and for tests.
+templ AgoAt(now time.Time, t time.Time) {
+	if !t.IsZero() {
+		if text := AgoText(now, t); text == Fallback(t, Day) {
+			<time datetime={ Attr(t) } data-localtime="day" data-localtime-title="second" title={ Fallback(t, Second) }>{ text }</time>
+		} else {
+			@Titled(t, Second) {
+				{ text }
+			}
+		}
+	}
+}
