@@ -237,6 +237,40 @@ func TestConvertMessagesToAnthropic_EmptyAssistantMessageExcluded(t *testing.T) 
 	}
 }
 
+// A forced tool and extended thinking are mutually exclusive at the
+// API: the pair is refused here, with the reason, rather than by the
+// provider's 400. On an adaptive family an unset level is thinking.
+func TestConvertToAnthropicRequest_ForcedToolRefusesThinking(t *testing.T) {
+	req := Request{
+		Messages:   []Message{UserMessage{Role: "user", Content: []ContentBlock{TextContent{Type: "text", Text: "hello"}}, Timestamp: time.Now()}},
+		Tools:      []Tool{{Name: "set_title", Description: "record the title"}},
+		ToolChoice: "set_title",
+	}
+	for name, tc := range map[string]struct {
+		model string
+		opts  StreamOptions
+		ok    bool
+	}{
+		"pre-adaptive, unset":     {"claude-haiku-4-5", StreamOptions{}, true},
+		"pre-adaptive, off":       {"claude-haiku-4-5", StreamOptions{ThinkingLevel: ThinkingOff}, true},
+		"pre-adaptive, thinking":  {"claude-haiku-4-5", StreamOptions{ThinkingLevel: ThinkingHigh}, false},
+		"adaptive, off":           {"claude-sonnet-5", StreamOptions{ThinkingLevel: ThinkingOff}, true},
+		"adaptive, unset":         {"claude-sonnet-5", StreamOptions{}, false},
+		"adaptive, thinking":      {"claude-sonnet-5", StreamOptions{ThinkingLevel: ThinkingLow}, false},
+		"always-thinking, off":    {"claude-fable-5", StreamOptions{ThinkingLevel: ThinkingOff}, false},
+		"always-thinking, unset":  {"claude-fable-5", StreamOptions{}, false},
+	} {
+		model := Model{ID: tc.model, MaxTokens: testCeiling}
+		_, err := convertToAnthropicRequest(model, req, tc.opts)
+		if tc.ok && err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+		if !tc.ok && err == nil {
+			t.Errorf("%s: expected a refusal", name)
+		}
+	}
+}
+
 func TestConvertToAnthropicRequest_ForcesToolChoice(t *testing.T) {
 	req := Request{
 		Messages: []Message{

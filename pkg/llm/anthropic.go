@@ -259,7 +259,19 @@ func convertToAnthropicRequest(model Model, req Request, opts StreamOptions) (an
 	}
 
 	// Force a specific tool when requested, for schema-constrained output.
+	// A forced tool and extended thinking are mutually exclusive at the
+	// API, which refuses the pair with a 400; refusing here names the
+	// reason. A caller forcing a tool says ThinkingOff — on the adaptive
+	// families thinking is on unless the request disables it, so an
+	// unset level is thinking too — and a model that thinks
+	// unconditionally cannot take a forced tool at all.
 	if req.ToolChoice != "" {
+		switch {
+		case modelAlwaysThinks(model.ID):
+			return anthropicRequest{}, fmt.Errorf("llm: %s thinks unconditionally and cannot take a forced tool (%s)", model.ID, req.ToolChoice)
+		case opts.ThinkingLevel != ThinkingOff && (opts.ThinkingLevel != "" || modelUsesAdaptiveThinking(model.ID)):
+			return anthropicRequest{}, fmt.Errorf("llm: a forced tool (%s) needs ThinkingOff: the API refuses tool_choice beside extended thinking", req.ToolChoice)
+		}
 		anthropicReq.ToolChoice = &anthropicToolChoice{Type: "tool", Name: req.ToolChoice}
 	}
 
