@@ -316,3 +316,39 @@ func TestPollTimeoutDrivesAPoll(t *testing.T) {
 		t.Error("the poll didn't report its result")
 	}
 }
+
+// TestPollShowsThePageAStallLeft is the reason Poll exists beside
+// chromedp's: a wait that never holds must say which expression it
+// was and what the page showed — the state a builder-only flake
+// stalled in, which no one can reproduce at the desk. A real Chrome
+// on a real clock, the bound shortened so the stall is quick; a wait
+// that holds passes through first, on the same browser.
+func TestPollShowsThePageAStallLeft(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `<!doctype html><title>t</title><h1>Queue</h1><p>1 album · 1 track</p><div>
+
+</div><p>Dark Noise</p>`)
+	}))
+	defer server.Close()
+
+	ctx := NewBrowser(t)
+	if err := chromedp.Run(ctx,
+		Step("open the page", chromedp.Navigate(server.URL)),
+		Poll(`document.querySelector("h1").textContent === "Queue"`),
+	); err != nil {
+		t.Fatalf("a wait that holds: %v", err)
+	}
+	const never = `document.querySelectorAll(".menu .menu-item").length > 2`
+	err := chromedp.Run(ctx, poll(never, 200*time.Millisecond))
+	if err == nil {
+		t.Fatal("a wait that never holds returned no error")
+	}
+	if !errors.Is(err, chromedp.ErrPollingTimeout) {
+		t.Errorf("error = %v, want it to wrap chromedp.ErrPollingTimeout", err)
+	}
+	for _, want := range []string{never, server.URL, "Queue\n1 album · 1 track\nDark Noise"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to carry %q", err, want)
+		}
+	}
+}

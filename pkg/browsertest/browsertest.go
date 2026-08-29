@@ -10,6 +10,7 @@
 //	err := chromedp.Run(ctx,
 //		browsertest.Step("open the dashboard", chromedp.Navigate(server.URL)),
 //		browsertest.Step("the table renders", chromedp.WaitVisible("#rows", chromedp.ByQuery)),
+//		browsertest.Poll(`document.querySelectorAll("#rows tr").length === 3`),
 //	)
 //
 // # Bound every waiting action
@@ -28,8 +29,11 @@
 // later step needs.
 //
 // An in-page poll is already bounded, but by its own separate 30s
-// default rather than by anything here. Pass PollTimeout to move both
-// budgets with one knob:
+// default rather than by anything here, and its timeout names nothing:
+// not the expression, not the page. Poll is the wait to use — the same
+// bound, the expression in the error, the page's text after it. Where
+// a poll must carry a result out, PollFunction with PollTimeout keeps
+// at least the bound in step:
 //
 //	chromedp.PollFunction(expr, &result, browsertest.PollTimeout)
 //
@@ -151,6 +155,47 @@ func Step(what string, action chromedp.Action) chromedp.ActionFunc {
 		}
 		return nil
 	}
+}
+
+// Poll is chromedp.Poll under the package's bounds, for every wait a
+// test makes on the page's state. A stall names the expression that
+// never held and shows the page as the wait gave up — its location
+// and its visible text — because a poll's timeout says nothing about
+// the state it timed out in, and a wait that stalls only on the
+// builder is otherwise a guess at the desk: which of a test's dozen
+// polls, on a page showing what.
+func Poll(expr string) chromedp.Action {
+	return poll(expr, StepTimeout)
+}
+
+// pageSnapshot is the page as a stall left it: its location, then its
+// visible text with blank lines folded, cut at a size that keeps a
+// test log readable.
+const pageSnapshot = `(() => {
+	const text = (document.body?.innerText ?? "").replace(/\n\s*\n+/g, "\n").trim();
+	return location.href + "\n" + (text.length > 2000 ? text.slice(0, 2000) + "…" : text);
+})()`
+
+// poll is Poll with its bound exposed, so a test of the stall itself
+// needn't wait out StepTimeout. The bound is the in-page one, which
+// reports chromedp.ErrPollingTimeout; Step's context bound around it
+// is the backstop for a page that stops answering at all.
+func poll(expr string, timeout time.Duration) chromedp.Action {
+	return chromedp.ActionFunc(func(ctx context.Context) error {
+		err := Step("wait for "+expr, chromedp.Poll(expr, nil, chromedp.WithPollingTimeout(timeout))).Do(ctx)
+		if err == nil {
+			return nil
+		}
+		// Read on the caller's context, the step's being spent, and
+		// briefly: a page that cannot answer is itself the finding.
+		snap, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		var page string
+		if e := chromedp.Evaluate(pageSnapshot, &page).Do(snap); e != nil {
+			return fmt.Errorf("%w (page unread: %v)", err, e)
+		}
+		return fmt.Errorf("%w\npage: %s", err, page)
+	})
 }
 
 // RequireChrome resolves a Chrome/Chromium binary on PATH and returns
