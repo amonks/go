@@ -234,6 +234,57 @@ func (c *Client) ChangeIDsForRevset(workspacePath, revset string) ([]string, err
 	return splitTrimmedLines(output), nil
 }
 
+// CommitIDsForRevset returns commit IDs for the given revset, one per
+// matching commit. Unlike CommitIDAt it tolerates a revset that matches
+// several commits or none — which is what a divergent change id resolves
+// to, and how a caller finds the other side of a divergence.
+func (c *Client) CommitIDsForRevset(workspacePath, revset string) ([]string, error) {
+	if strings.TrimSpace(revset) == "" {
+		return nil, fmt.Errorf("revset is required")
+	}
+	cmd := exec.Command("jj", "log", "--no-graph", "-r", revset, "-T", `commit_id ++ "\n"`)
+	cmd.Dir = workspacePath
+	output, err := commandOutput(cmd, "jj log commit ids")
+	if err != nil {
+		return nil, err
+	}
+	return splitTrimmedLines(output), nil
+}
+
+// WorkingCopyChangeCommitIDs returns every visible commit sharing the change
+// ID the repo believes the workspace's working copy is at.
+//
+// It reads with --ignore-working-copy, so it answers for a stale workspace
+// too, where every command that touches the working copy is refused. That is
+// the case it exists for: a caller about to run WorkspaceUpdateStale can take
+// this before and after to see which commit the recovery created, rather than
+// guessing from the ones that are there afterwards.
+//
+// It returns a list because the answer is plural exactly when it matters — a
+// rewritten change and a recovered one share an id — and a change can already
+// be divergent for reasons of its own, from concurrent operations elsewhere.
+// The query goes through change_id() since a bare divergent id is an error in
+// a revset.
+func (c *Client) WorkingCopyChangeCommitIDs(workspacePath string) ([]string, error) {
+	cmd := exec.Command("jj", "--ignore-working-copy", "log", "-r", "@", "-T", "change_id", "--no-graph")
+	cmd.Dir = workspacePath
+	changeID, err := commandOutputString(cmd, "jj log working-copy change id")
+	if err != nil {
+		return nil, err
+	}
+	if changeID == "" {
+		return nil, fmt.Errorf("no working-copy change id")
+	}
+	cmd = exec.Command("jj", "--ignore-working-copy", "log", "--no-graph",
+		"-r", "change_id("+changeID+")", "-T", `commit_id ++ "\n"`)
+	cmd.Dir = workspacePath
+	output, err := commandOutput(cmd, "jj log commit ids")
+	if err != nil {
+		return nil, err
+	}
+	return splitTrimmedLines(output), nil
+}
+
 // CommitIDAt returns the commit ID at the given revision.
 func (c *Client) CommitIDAt(workspacePath, rev string) (string, error) {
 	return logFieldAt(workspacePath, rev, "commit_id")
@@ -255,11 +306,15 @@ func (c *Client) DescriptionAt(workspacePath, rev string) (string, error) {
 	return logFieldAt(workspacePath, rev, "description")
 }
 
-// Snapshot runs jj debug snapshot to record working copy changes to the current change.
+// Snapshot records working copy changes to the current change.
+//
+// `jj util snapshot`, not the `jj debug snapshot` alias jj deprecated and
+// plans to remove: the alias still works, but it prints a deprecation warning
+// that lands inside the text of every error this call reports.
 func (c *Client) Snapshot(workspacePath string) error {
-	cmd := exec.Command("jj", "debug", "snapshot")
+	cmd := exec.Command("jj", "util", "snapshot")
 	cmd.Dir = workspacePath
-	return runCombinedOutput(cmd, "jj debug snapshot")
+	return runCombinedOutput(cmd, "jj util snapshot")
 }
 
 // Describe sets the description for the current change.

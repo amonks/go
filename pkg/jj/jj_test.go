@@ -3,6 +3,7 @@ package jj_test
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -782,6 +783,108 @@ func TestDescribeAt_ClearDescription(t *testing.T) {
 	if desc != "" {
 		t.Errorf("expected cleared description, got %q", desc)
 	}
+}
+
+// runRawJJ runs a jj command the package does not wrap. The divergence test
+// needs --at-operation, which is deliberately unwrapped (see pkg-jj's note on
+// operation-log commands).
+func runRawJJ(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("jj", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("jj %s: %v: %s", strings.Join(args, " "), err, out)
+	}
+}
+
+// A divergent change id is the case these helpers exist for, and the case a
+// bare id cannot express: jj rejects it outright, so the query has to go
+// through change_id().
+func TestCommitIDsForRevset_DivergentChangeID(t *testing.T) {
+	repoPath, wsPath, client := divergenceFixture(t)
+	changeID, err := client.ChangeIDAt(wsPath, "@")
+	if err != nil {
+		t.Fatalf("change id: %v", err)
+	}
+
+	if ids, err := client.WorkingCopyChangeCommitIDs(wsPath); err != nil {
+		t.Fatalf("working-copy change commits: %v", err)
+	} else if len(ids) != 1 {
+		t.Fatalf("commits under a non-divergent change = %v, want 1", ids)
+	}
+
+	// Two operations racing from the same parent op diverge the change.
+	runRawJJ(t, repoPath, "--at-operation", "@", "rebase", "-r", changeID, "-d", "root()")
+	runRawJJ(t, repoPath, "--at-operation", "@-", "rebase", "-r", changeID, "-d", "main")
+
+	if _, err := client.CommitIDsForRevset(repoPath, changeID); err == nil {
+		t.Error("expected a bare divergent change id to be rejected as a revset")
+	}
+	divergent, err := client.CommitIDsForRevset(repoPath, "change_id("+changeID+")")
+	if err != nil {
+		t.Fatalf("change_id() revset: %v", err)
+	}
+	if len(divergent) != 2 {
+		t.Errorf("commits under a divergent change = %v, want 2", divergent)
+	}
+}
+
+// The read has to answer while the working copy is stale, because that is when
+// its caller needs it: the pool takes it just before update-stale, to tell what
+// the recovery creates from what the change already had.
+func TestWorkingCopyChangeCommitIDs_ReadsAStaleWorkspace(t *testing.T) {
+	repoPath, wsPath, client := divergenceFixture(t)
+	// Park the workspace on a fresh empty change over main, the shape a
+	// pooled workspace idles in — and the shape a rewrite stales in bulk.
+	if _, err := client.NewChange(wsPath, "main"); err != nil {
+		t.Fatalf("new change: %v", err)
+	}
+
+	runRawJJ(t, repoPath, "rebase", "-r", "wsA@", "-d", "root()")
+	if _, err := client.CurrentChangeID(wsPath); !jj.IsStaleWorkingCopy(err) {
+		t.Fatalf("expected the workspace to be stale, got %v", err)
+	}
+
+	ids, err := client.WorkingCopyChangeCommitIDs(wsPath)
+	if err != nil {
+		t.Fatalf("working-copy change commits on a stale workspace: %v", err)
+	}
+	if len(ids) != 1 {
+		t.Errorf("commits read from a stale workspace = %v, want 1", ids)
+	}
+}
+
+// divergenceFixture is a repo with main, plus a workspace wsA holding a
+// non-empty change of its own.
+func divergenceFixture(t *testing.T) (string, string, *jj.Client) {
+	t.Helper()
+	repoPath := t.TempDir()
+	repoPath, _ = filepath.EvalSymlinks(repoPath)
+	client := jj.New()
+	if err := client.Init(repoPath); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoPath, "f.txt"), []byte("hello\n"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := client.Describe(repoPath, "base"); err != nil {
+		t.Fatalf("describe: %v", err)
+	}
+	if err := client.BookmarkCreate(repoPath, "main", "@"); err != nil {
+		t.Fatalf("bookmark: %v", err)
+	}
+
+	wsPath := filepath.Join(t.TempDir(), "wsA")
+	if err := client.WorkspaceAdd(repoPath, "wsA", wsPath); err != nil {
+		t.Fatalf("workspace add: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wsPath, "g.txt"), []byte("work\n"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := client.Snapshot(wsPath); err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	return repoPath, wsPath, client
 }
 
 func TestIsStaleWorkingCopy(t *testing.T) {
