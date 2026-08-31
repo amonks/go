@@ -226,15 +226,30 @@ func convertMessagesToOpenAI(systemBlocks []SystemBlock, messages []Message) []o
 		})
 	}
 
+	// The API takes no images in tool messages, and every tool result for an
+	// assistant turn's calls must directly follow it — so images ride one
+	// synthetic user message after the run of tool results, each preceded by
+	// a text part naming the call it belongs to.
+	var pendingToolImages []openAIContentPart
+	flushToolImages := func() {
+		if len(pendingToolImages) == 0 {
+			return
+		}
+		result = append(result, openAIMessage{Role: "user", Content: pendingToolImages})
+		pendingToolImages = nil
+	}
+
 	for _, msg := range messages {
 		switch m := msg.(type) {
 		case UserMessage:
+			flushToolImages()
 			content := convertContentBlocksToOpenAI(m.Content)
 			result = append(result, openAIMessage{
 				Role:    "user",
 				Content: content,
 			})
 		case AssistantMessage:
+			flushToolImages()
 			assistantMsg := openAIMessage{
 				Role: "assistant",
 			}
@@ -269,8 +284,21 @@ func convertMessagesToOpenAI(systemBlocks []SystemBlock, messages []Message) []o
 				Content:    extractTextFromContent(m.Content),
 				ToolCallID: m.ToolCallID,
 			})
+			for i, img := range imageBlocks(m.Content) {
+				if i == 0 {
+					pendingToolImages = append(pendingToolImages, openAIContentPart{
+						Type: "text",
+						Text: "Image output of tool call " + m.ToolCallID + ":",
+					})
+				}
+				pendingToolImages = append(pendingToolImages, openAIContentPart{
+					Type:     "image_url",
+					ImageURL: &openAIImageURL{URL: "data:" + img.MimeType + ";base64," + img.Data},
+				})
+			}
 		}
 	}
+	flushToolImages()
 
 	return result
 }
@@ -729,12 +757,29 @@ func convertMessagesToResponsesInput(messages []Message) any {
 		})
 	}
 
+	// Same constraint as the chat path: function_call_output is text-only and
+	// the outputs of one assistant turn must stay adjacent, so tool-result
+	// images ride one synthetic user item after the run of outputs.
+	var pendingToolImages []responsesContentPart
+	flushToolImages := func() {
+		if len(pendingToolImages) == 0 {
+			return
+		}
+		items = append(items, map[string]any{
+			"role":    "user",
+			"content": pendingToolImages,
+		})
+		pendingToolImages = nil
+	}
+
 	for _, msg := range messages {
 		switch m := msg.(type) {
 		case UserMessage:
+			flushToolImages()
 			appendUser(m)
 
 		case AssistantMessage:
+			flushToolImages()
 			// Responses API models return function calls as separate output items.
 			// We recreate that structure from our internal message representation by
 			// emitting:
@@ -781,8 +826,21 @@ func convertMessagesToResponsesInput(messages []Message) any {
 				"call_id": m.ToolCallID,
 				"output":  extractTextFromContent(m.Content),
 			})
+			for i, img := range imageBlocks(m.Content) {
+				if i == 0 {
+					pendingToolImages = append(pendingToolImages, responsesContentPart{
+						Type: "input_text",
+						Text: "Image output of tool call " + m.ToolCallID + ":",
+					})
+				}
+				pendingToolImages = append(pendingToolImages, responsesContentPart{
+					Type:     "input_image",
+					ImageURL: "data:" + img.MimeType + ";base64," + img.Data,
+				})
+			}
 		}
 	}
+	flushToolImages()
 
 	return items
 }

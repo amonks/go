@@ -52,15 +52,19 @@ type anthropicMessage struct {
 }
 
 type anthropicContent struct {
-	Type         string                 `json:"type"`
-	Text         string                 `json:"text,omitempty"`
-	Thinking     string                 `json:"thinking,omitempty"`
-	Source       *anthropicSource       `json:"source,omitempty"`
-	ID           string                 `json:"id,omitempty"`
-	Name         string                 `json:"name,omitempty"`
-	Input        map[string]any         `json:"input,omitempty"`
-	ToolUseID    string                 `json:"tool_use_id,omitempty"`
-	Content      string                 `json:"content,omitempty"`
+	Type     string           `json:"type"`
+	Text     string           `json:"text,omitempty"`
+	Thinking string           `json:"thinking,omitempty"`
+	Source   *anthropicSource `json:"source,omitempty"`
+	ID       string           `json:"id,omitempty"`
+	Name     string           `json:"name,omitempty"`
+	Input    map[string]any   `json:"input,omitempty"`
+	ToolUseID string          `json:"tool_use_id,omitempty"`
+	// Content is a tool_result's payload: the API takes a plain string or an
+	// array of text/image blocks, so this holds a string or
+	// []anthropicContent (nil omits the key, the shape an empty result has
+	// always been sent as).
+	Content      any                    `json:"content,omitempty"`
 	IsError      bool                   `json:"is_error,omitempty"`
 	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
 }
@@ -443,7 +447,7 @@ func convertMessagesToAnthropic(messages []Message) []anthropicMessage {
 			pendingToolResults = append(pendingToolResults, anthropicContent{
 				Type:      "tool_result",
 				ToolUseID: m.ToolCallID,
-				Content:   extractTextFromContent(m.Content),
+				Content:   toolResultContentToAnthropic(m.Content),
 				IsError:   m.IsError,
 			})
 		}
@@ -491,6 +495,52 @@ func convertContentBlocksToAnthropic(blocks []ContentBlock) []anthropicContent {
 	}
 
 	return result
+}
+
+// toolResultContentToAnthropic picks the tool_result content's wire form: a
+// text-only result stays the plain string it has always been (nil when
+// empty, omitting the key), and a result carrying images becomes the block
+// array the API takes.
+func toolResultContentToAnthropic(blocks []ContentBlock) any {
+	if len(imageBlocks(blocks)) == 0 {
+		if text := extractTextFromContent(blocks); text != "" {
+			return text
+		}
+		return nil
+	}
+	var result []anthropicContent
+	for _, block := range blocks {
+		switch b := block.(type) {
+		case TextContent:
+			// The API rejects empty text blocks, so an image-only result
+			// carries no text half.
+			if b.Text == "" {
+				continue
+			}
+			result = append(result, anthropicContent{Type: "text", Text: b.Text})
+		case ImageContent:
+			result = append(result, anthropicContent{
+				Type: "image",
+				Source: &anthropicSource{
+					Type:      "base64",
+					MediaType: b.MimeType,
+					Data:      b.Data,
+				},
+			})
+		}
+	}
+	return result
+}
+
+// imageBlocks collects the image blocks out of mixed content.
+func imageBlocks(blocks []ContentBlock) []ImageContent {
+	var out []ImageContent
+	for _, block := range blocks {
+		if ic, ok := block.(ImageContent); ok {
+			out = append(out, ic)
+		}
+	}
+	return out
 }
 
 func extractTextFromContent(blocks []ContentBlock) string {
