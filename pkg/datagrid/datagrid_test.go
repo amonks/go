@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -565,6 +566,53 @@ func TestTablePanelAttribute(t *testing.T) {
 	}
 	if !strings.Contains(renderComponent(t, StyleForDocumentHead()), `monks-datagrid:not([data-dg-panel="top"]) .datagrid-panel`) {
 		t.Fatal("the rail rules should yield to data-dg-panel=\"top\"")
+	}
+}
+
+// The table declares min-inline-size: max-content inside a scrolled wrap,
+// so on a phone it lays out several times wider than the viewport — exactly
+// the shape that triggers iOS WebKit's text autosizing, which boosts the
+// wide cells (a Path column) while leaving small ones alone. The grid is
+// chrome-neutral and cannot assume its host's reset pins text-size-adjust,
+// so it pins the property on its own root; the property inherits, covering
+// every cell.
+func TestGridPinsTextSizeAdjust(t *testing.T) {
+	// The pin must sit on the component root — the property inherits, so
+	// anywhere narrower leaves some cells adjustable, and headless Chrome
+	// doesn't autosize, so only this assertion on the served bytes would
+	// notice it going missing. Comments are stripped so prose can't
+	// satisfy the check.
+	css := renderComponent(t, StyleForDocumentHead())
+	css = css[strings.Index(css, ">")+1:] // past the <style> tag
+	for {
+		start := strings.Index(css, "/*")
+		if start < 0 {
+			break
+		}
+		end := strings.Index(css[start:], "*/")
+		if end < 0 {
+			t.Fatal("unterminated comment in stylesheet")
+		}
+		css = css[:start] + css[start+end+2:]
+	}
+	var body string
+	for chunk := range strings.SplitSeq(css, "}") {
+		before, b, ok := strings.Cut(chunk, "{")
+		if ok && strings.TrimSpace(before) == "monks-datagrid" {
+			body = b
+			break
+		}
+	}
+	if body == "" {
+		t.Fatal("stylesheet has no monks-datagrid root rule")
+	}
+	if !strings.Contains(body, "-webkit-text-size-adjust: 100%") {
+		t.Error("grid root does not pin -webkit-text-size-adjust, so iOS autosizes wide cells")
+	}
+	// The prefixed line contains the unprefixed name, so match the
+	// declaration at a line start rather than as a substring.
+	if !regexp.MustCompile(`(?m)^\s*text-size-adjust: 100%`).MatchString(body) {
+		t.Error("grid root does not pin the unprefixed text-size-adjust")
 	}
 }
 

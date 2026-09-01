@@ -29,6 +29,12 @@ monks-datagrid {
   font-size: 0.875rem;
   line-height: 1.45;
   text-align: start;
+  /* The table lays out wider than a phone's viewport, which is the shape
+     that triggers iOS WebKit's text autosizing; the grid can't assume its
+     host's reset pins the adjustment, so it pins its own subtree (the
+     property inherits). */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 monks-datagrid[data-dg-theme="light"] {
