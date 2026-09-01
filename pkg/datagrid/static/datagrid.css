@@ -447,8 +447,14 @@ monks-datagrid .datagrid-table caption {
   text-align: start;
 }
 
-monks-datagrid .datagrid-table th,
-monks-datagrid .datagrid-table td {
+/* Cell defaults follow the same calibration as the button rule below:
+   the table scope sits in :where() so each arm weighs one element more
+   than the host chrome's bare td/th rules — enough to beat them
+   wherever this sheet lands, and no more — so any class a grid author
+   puts on a cell (CellClass "small muted", a status color, td.num's
+   alignment) applies instead of dying under this rule's weight. */
+monks-datagrid :where(.datagrid-table) th,
+monks-datagrid :where(.datagrid-table) td {
   min-inline-size: 0;
   padding: 0.125rem 0.375rem;
   border: 0;
@@ -458,6 +464,22 @@ monks-datagrid .datagrid-table td {
   text-align: start;
   vertical-align: middle;
   white-space: nowrap;
+}
+
+/* Text in this table is one size — the cell's. The host chrome's
+   size-shifting text utilities are neutralized inside it: the optical
+   mono shrink (opsui's code and .mono at 0.925em) matches mono runs to
+   proportional prose, which the table has none of, and .small's
+   absolute 12px coincides with the table's 0.75rem only at a 16px
+   root and drifts from it at any other. Each arm weighs one element
+   over the chrome's rule it neutralizes — which also outranks any
+   other bare one-class sizing rule on the same element, deliberately:
+   resizing cell text takes a heavier rule. The chrome's .chip is
+   carved out (in :where(), adding no weight) because a chip is its own
+   component and keeps its own absolute size. */
+monks-datagrid :where(.datagrid-table) code,
+monks-datagrid :where(.datagrid-table) :is(.mono, .small):where(:not(.chip)) {
+  font-size: inherit;
 }
 
 /* A button in a body cell — a row's verb — is sized to the row, not to
@@ -492,7 +514,10 @@ monks-datagrid .datagrid-table thead th {
   text-transform: none;
 }
 
-monks-datagrid .datagrid-table tbody th[scope="row"] {
+/* Same calibration as the cell defaults: beat the chrome's bare th
+   (uppercase, letterspaced) by one element, yield to any class the
+   grid author puts on a row header. */
+monks-datagrid :where(.datagrid-table tbody) th:where([scope="row"]) {
   font-weight: 600;
   letter-spacing: normal;
   text-transform: none;
@@ -827,8 +852,8 @@ monks-datagrid:not([data-dg-ready]) .datagrid-sort:disabled {
     display: none;
   }
 
-  monks-datagrid .datagrid-table th,
-  monks-datagrid .datagrid-table td {
+  monks-datagrid :where(.datagrid-table) th,
+  monks-datagrid :where(.datagrid-table) td {
     padding-inline: 0.375rem;
   }
 }

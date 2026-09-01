@@ -1892,3 +1892,166 @@ func TestBrowserDefaultFilterIsTheResetBaseline(t *testing.T) {
 		t.Errorf("control label = %q, want Reset", got.Label)
 	}
 }
+
+// TestBrowserHostChromeCascade pins the weight calibration the
+// stylesheet's comments promise, against a host chrome shaped like
+// opsui's: bare td/th element rules, size-shifting text utilities
+// (code/.mono's 0.925em optical shrink, .small's absolute 12px), and
+// one-class rules a grid author reaches for through CellClass. The
+// cell and row-header defaults must beat the chrome's element rules
+// and yield to any class on the cell; text inside the table must be
+// one size — the cell's — whatever it is wrapped in, with the chrome's
+// chip keeping its own size; and a utility's non-size declarations
+// (.small's color) must land even where its size is neutralized. The
+// fixture's 20px root keeps the absolute-vs-rem distinction visible.
+func TestBrowserHostChromeCascade(t *testing.T) {
+	type entry struct{ Name, Path string }
+	name := TextColumn("name", "Name", func(e entry) string { return e.Name })
+	owner := TextColumn("owner", "Owner", func(e entry) string { return e.Name })
+	owner.RowHeader = true
+	owner.CellClass = func(entry) string { return "label" }
+	path := TextColumn("path", "Path", func(e entry) string { return e.Path })
+	path.Cell = func(e entry) templ.Component {
+		return templ.ComponentFunc(func(_ context.Context, w io.Writer) error {
+			_, err := io.WriteString(w, `<code>`+e.Path+`</code>`)
+			return err
+		})
+	}
+	machine := TextColumn("machine", "Machine", func(e entry) string { return e.Name })
+	machine.CellClass = func(entry) string { return "mono" }
+	mixed := TextColumn("mixed", "Mixed", func(e entry) string { return e.Name })
+	mixed.CellClass = func(entry) string { return "mono small" }
+	detail := TextColumn("detail", "Detail", func(e entry) string { return e.Name })
+	detail.CellClass = func(entry) string { return "small muted" }
+	count := TextColumn("count", "Count", func(entry) string { return "3" })
+	count.CellClass = func(entry) string { return "num" }
+	delta := TextColumn("delta", "Delta", func(entry) string { return "+2" })
+	delta.CellClass = func(entry) string { return "delta-good" }
+	timing := TextColumn("timing", "Timing", func(entry) string { return "0 10 * * mon" })
+	timing.Cell = func(entry) templ.Component {
+		return templ.ComponentFunc(func(_ context.Context, w io.Writer) error {
+			_, err := io.WriteString(w, `<span class="chip mono">0 10 * * mon</span>`)
+			return err
+		})
+	}
+	options := Options[entry]{
+		ID:      "cascade",
+		Caption: "Cascade calibration",
+		Columns: []Column[entry]{owner, name, path, machine, mixed, detail, count, delta, timing},
+		RowID: func(e entry) string { return e.Name },
+	}
+
+	var out strings.Builder
+	out.WriteString(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>cascade</title>`)
+	if err := Head().Render(context.Background(), &out); err != nil {
+		t.Fatal(err)
+	}
+	out.WriteString(`<style>
+		/* 20px root: where opsui's absolute 12px .small and the grid's
+		   0.75rem stop coinciding, so a leak renders at a wrong size
+		   instead of hiding behind the 16px default's arithmetic. */
+		html { font-size:20px; }
+		body { margin:0; font-family:sans-serif; font-size:14px; color:rgb(10,20,30); }
+		table { border-collapse:collapse; width:100%; }
+		th { text-align:left; font-size:13px; text-transform:uppercase; padding:6px 10px; }
+		td { text-align:left; padding:7px 10px; }
+		th.num, td.num { text-align:right; }
+		code { font-family:monospace; font-size:0.925em; }
+		.mono { font-family:monospace; font-size:0.925em; }
+		.small { font-size:12px; color:rgb(70,80,90); }
+		.muted { color:rgb(130,140,150); }
+		.delta-good { color:rgb(20,160,60); }
+		.chip { font-size:11px; }
+		.label { font-weight:500; }
+	</style></head><body>`)
+	if err := Table(options, []entry{{Name: "one", Path: "/ws/one"}}).Render(context.Background(), &out); err != nil {
+		t.Fatal(err)
+	}
+	out.WriteString(`</body></html>`)
+	html := out.String()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(html))
+	}))
+	defer server.Close()
+
+	ctx := browsertest.NewBrowser(t)
+	if err := chromedp.Run(ctx,
+		chromedp.EmulateViewport(1440, 1000),
+		browsertest.Step("open cascade fixture", chromedp.Navigate(server.URL+"/")),
+		chromedp.Poll(`document.querySelectorAll("monks-datagrid[data-dg-ready]").length === 1`, nil,
+			browsertest.PollTimeout),
+	); err != nil {
+		t.Fatalf("open cascade fixture: %v", err)
+	}
+
+	var got struct {
+		PlainSize       string `json:"plainSize"`
+		CodeSize        string `json:"codeSize"`
+		MonoSize        string `json:"monoSize"`
+		MixedSize       string `json:"mixedSize"`
+		MixedColor      string `json:"mixedColor"`
+		HeaderWeight    string `json:"headerWeight"`
+		MutedColor      string `json:"mutedColor"`
+		DeltaColor      string `json:"deltaColor"`
+		NumAlign        string `json:"numAlign"`
+		ChipSize        string `json:"chipSize"`
+		CellPadding     string `json:"cellPadding"`
+		HeaderSize      string `json:"headerSize"`
+		HeaderTransform string `json:"headerTransform"`
+	}
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
+		const grid = document.querySelector('#cascade');
+		const cell = key => grid.querySelector('tbody [data-dg-column="' + key + '"]');
+		const cs = el => getComputedStyle(el);
+		const header = grid.querySelector('thead th');
+		return {
+			plainSize: cs(cell('name')).fontSize,
+			codeSize: cs(cell('path').querySelector('code')).fontSize,
+			monoSize: cs(cell('machine')).fontSize,
+			mixedSize: cs(cell('mixed')).fontSize,
+			mixedColor: cs(cell('mixed')).color,
+			headerWeight: cs(cell('owner')).fontWeight,
+			mutedColor: cs(cell('detail')).color,
+			deltaColor: cs(cell('delta')).color,
+			numAlign: cs(cell('count')).textAlign,
+			chipSize: cs(cell('timing').querySelector('.chip')).fontSize,
+			cellPadding: cs(cell('name')).paddingTop,
+			headerSize: cs(header).fontSize,
+			headerTransform: cs(header).textTransform,
+		};
+	})()`, &got)); err != nil {
+		t.Fatal(err)
+	}
+
+	if got.PlainSize != "15px" || got.CodeSize != got.PlainSize ||
+		got.MonoSize != got.PlainSize || got.MixedSize != got.PlainSize {
+		t.Errorf("cell text sizes diverge: plain=%q code=%q mono=%q mono-small=%q, want all 15px (0.75rem of the 20px root)",
+			got.PlainSize, got.CodeSize, got.MonoSize, got.MixedSize)
+	}
+	if got.MixedColor != "rgb(70, 80, 90)" {
+		t.Errorf("mono-small cell color = %q, want .small's rgb(70, 80, 90) — the color lands even though the size is neutral", got.MixedColor)
+	}
+	if got.HeaderWeight != "500" {
+		t.Errorf("classed row header font-weight = %q, want the class's 500 over the grid's 600 default", got.HeaderWeight)
+	}
+	if got.MutedColor != "rgb(130, 140, 150)" {
+		t.Errorf("muted cell color = %q, want the utility's rgb(130, 140, 150)", got.MutedColor)
+	}
+	if got.DeltaColor != "rgb(20, 160, 60)" {
+		t.Errorf("status-classed cell color = %q, want the app rule's rgb(20, 160, 60)", got.DeltaColor)
+	}
+	if got.NumAlign != "right" {
+		t.Errorf("num cell text-align = %q, want right", got.NumAlign)
+	}
+	if got.ChipSize != "11px" {
+		t.Errorf("chip.mono in a cell = %q, want the chip's own 11px", got.ChipSize)
+	}
+	if got.CellPadding != "2.5px" {
+		t.Errorf("cell padding = %q, want the grid's own 0.125rem (2.5px) over the chrome's 7px", got.CellPadding)
+	}
+	if got.HeaderSize != "13.75px" || got.HeaderTransform != "none" {
+		t.Errorf("header = %q/%q, want the grid's own 0.6875rem (13.75px)/none over the chrome's 13px/uppercase",
+			got.HeaderSize, got.HeaderTransform)
+	}
+}
