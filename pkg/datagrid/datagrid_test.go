@@ -2,6 +2,7 @@ package datagrid
 
 import (
 	"context"
+	"fmt"
 	"html"
 	"io"
 	"strings"
@@ -151,6 +152,57 @@ func TestTableRendersSupplementalControlsInResponsivePanel(t *testing.T) {
 	table := strings.Index(got, `<table`)
 	if panel < 0 || button < panel || table < button {
 		t.Fatalf("supplemental control should render in the panel before the table:\n%s", got)
+	}
+}
+
+// A grid with no children — or children that render nothing — has no
+// supplemental slot: the slot is a full-width flex item in the top-bar
+// layout, so an empty one would still wrap onto a row of its own under
+// the filters and pad the panel's bottom edge.
+func TestTableOmitsAnEmptySupplementalSlot(t *testing.T) {
+	opts := Options[string]{
+		ID:      "items",
+		Columns: []Column[string]{TextColumn("item", "Item", func(value string) string { return value })},
+	}
+	for name, ctx := range map[string]context.Context{
+		"no children":    context.Background(),
+		"blank children": templ.WithChildren(context.Background(), templ.Raw("\n\t ")),
+	} {
+		var out strings.Builder
+		if err := Table(opts, []string{"one"}).Render(ctx, &out); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(out.String(), "datagrid-extra") {
+			t.Errorf("%s: an empty supplemental slot rendered:\n%s", name, out.String())
+		}
+	}
+}
+
+// A child renders with the child slot cleared, as it would inside a templ
+// component's `{ children... }`: one that forwards its own children finds
+// none, rather than itself. The depth guard keeps the failure bounded.
+func TestTableRendersChildrenWithTheChildSlotCleared(t *testing.T) {
+	opts := Options[string]{
+		ID:      "items",
+		Columns: []Column[string]{TextColumn("item", "Item", func(value string) string { return value })},
+	}
+	depth := 0
+	forwarding := templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
+		depth++
+		if depth > 3 {
+			return fmt.Errorf("child rendered itself %d times", depth)
+		}
+		if _, err := io.WriteString(w, `<button type="button" id="forwarded">Act</button>`); err != nil {
+			return err
+		}
+		return templ.GetChildren(ctx).Render(ctx, w)
+	})
+	var out strings.Builder
+	if err := Table(opts, []string{"one"}).Render(templ.WithChildren(context.Background(), forwarding), &out); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(out.String(), `id="forwarded"`); got != 1 {
+		t.Fatalf("forwarding child rendered %d times, want 1:\n%s", got, out.String())
 	}
 }
 

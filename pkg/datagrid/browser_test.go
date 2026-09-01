@@ -295,6 +295,50 @@ func TestBrowserClosedFilterPopoversStayOutOfNarrowLayout(t *testing.T) {
 	}
 }
 
+// TestBrowserTopBarPanelSitsEvenlyAroundItsControls: in the top-bar
+// layout the panel's padding is the only space around its controls, so
+// the inset above the first row equals the inset below the last one. A
+// grid with nothing supplemental (compact) keeps that; a grid with
+// supplemental content (people) shows it in the panel.
+func TestBrowserTopBarPanelSitsEvenlyAroundItsControls(t *testing.T) {
+	server := browserServer(t)
+	defer server.Close()
+	ctx := browsertest.NewBrowser(t)
+	navigateReady(t, ctx, server.URL+"/")
+
+	var got struct {
+		Top    float64 `json:"top"`
+		Bottom float64 `json:"bottom"`
+		Extra  string  `json:"extra"`
+	}
+	if err := chromedp.Run(ctx,
+		chromedp.Evaluate(`(() => {
+			const panel = document.querySelector('#compact .datagrid-panel');
+			// A supplemental slot, where a grid has one, is a wrapper: what it
+			// holds is the control.
+			const boxes = [...panel.querySelectorAll('*')]
+				.filter((el) => !el.matches('.datagrid-extra'))
+				.map((el) => el.getBoundingClientRect())
+				.filter((b) => b.height > 0 && b.width > 0);
+			const rect = panel.getBoundingClientRect();
+			const extra = document.querySelector('#people .datagrid-extra .preview-extra');
+			return {
+				top: Math.min(...boxes.map((b) => b.top)) - rect.top,
+				bottom: rect.bottom - Math.max(...boxes.map((b) => b.bottom)),
+				extra: extra ? getComputedStyle(extra).display : "missing",
+			};
+		})()`, &got),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if got.Top <= 0 || got.Bottom <= 0 || got.Bottom-got.Top > 1 || got.Top-got.Bottom > 1 {
+		t.Errorf("top-bar panel insets uneven: %#v", got)
+	}
+	if got.Extra == "missing" || got.Extra == "none" {
+		t.Errorf("supplemental content not shown: %#v", got)
+	}
+}
+
 // TestBrowserOpenFacetDismissal drives an open facet with real pointer
 // and key events: a press inside it — an option, its own summary — is
 // its own business, and anything else on the page dismisses it, whether
@@ -702,7 +746,7 @@ func TestBrowserInteractionsPreserveRowsURLAndGridIsolation(t *testing.T) {
 			wideSide: wide.side,
 			narrowTop: narrow.top,
 			plainFull: Math.abs(content.left - root.left) < 2 && Math.abs(content.width - root.width) < 2,
-			plainPanelHidden: getComputedStyle(plain.querySelector('.datagrid-panel')).display === 'none',
+			plainPanelHidden: (p => p === null || getComputedStyle(p).display === 'none')(plain.querySelector('.datagrid-panel')),
 			plainRows: plain.querySelectorAll('tr[data-dg-row]:not([hidden])').length,
 			plainControls: plain.querySelectorAll('button, input, select').length,
 		};

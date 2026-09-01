@@ -271,12 +271,36 @@ var prefixPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]*$`)
 // Configuration errors are returned when the component is rendered.
 func Table[T any](opts Options[T], rows []T) templ.Component {
 	return templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
-		view, err := makeTableView(opts, rows, templ.GetChildren(ctx))
+		extra, err := supplemental(ctx)
+		if err != nil {
+			return fmt.Errorf("datagrid: %w", err)
+		}
+		view, err := makeTableView(opts, rows, extra)
 		if err != nil {
 			return fmt.Errorf("datagrid: %w", err)
 		}
 		return renderTable(view).Render(ctx, w)
 	})
+}
+
+// supplemental renders Table's children for the panel's supplemental slot,
+// or nil when there is nothing to show. templ hands a component with no
+// children a no-op child rather than none, and the slot is a full-width
+// flex item in the top-bar layout: an empty one still wraps onto a row of
+// its own under the filters, padding the panel's bottom edge.
+//
+// The children render under a context with the child slot cleared, as a
+// templ component's `{ children... }` does: a child that forwards its own
+// children would otherwise find itself there and recurse.
+func supplemental(ctx context.Context) (templ.Component, error) {
+	var out strings.Builder
+	if err := templ.GetChildren(ctx).Render(templ.ClearChildren(ctx), &out); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(out.String()) == "" {
+		return nil, nil
+	}
+	return templ.Raw(out.String()), nil
 }
 
 func makeTableView[T any](opts Options[T], rows []T, extra templ.Component) (tableView, error) {

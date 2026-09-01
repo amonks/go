@@ -369,6 +369,13 @@ monks-datagrid .datagrid-filter-clear:hover {
   background: var(--datagrid-accent-soft);
 }
 
+/* A slot with nothing in it is no slot: it would otherwise wrap onto a
+   row of its own and pad the panel's bottom edge. Table omits an empty
+   one; this covers a Shell caller's component that renders nothing. */
+monks-datagrid :is(.datagrid-control-override, .datagrid-extra):empty {
+  display: none;
+}
+
 monks-datagrid .datagrid-control-override,
 monks-datagrid .datagrid-extra {
   flex: 1 1 100%;
