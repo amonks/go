@@ -84,7 +84,7 @@ func ModelLimits(ctx context.Context, model Model) (Limits, error) {
 
 // limitsClient bounds the metadata GET; unlike a completion stream, it
 // has no business taking long.
-var limitsClient = &http.Client{Timeout: 30 * time.Second}
+var limitsClient = newHTTPClient(30 * time.Second)
 
 // ErrNoLimits reports a provider that publishes no per-model limits.
 var ErrNoLimits = errors.New("llm: provider publishes no model limits")

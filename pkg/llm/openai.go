@@ -134,7 +134,7 @@ func streamOpenAICompletions(ctx context.Context, model Model, req Request, opts
 		httpReq.Header.Set("session_id", opts.SessionID)
 	}
 
-	client := &http.Client{}
+	client := newHTTPClient(0)
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		// Network errors (connection refused, timeout, DNS failure, etc.) are retryable
@@ -630,7 +630,7 @@ func streamOpenAIResponses(ctx context.Context, model Model, req Request, opts S
 		httpReq.Header.Set("session_id", opts.SessionID)
 	}
 
-	client := &http.Client{}
+	client := newHTTPClient(0)
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return nil, &retryableError{

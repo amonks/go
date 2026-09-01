@@ -52,14 +52,14 @@ type anthropicMessage struct {
 }
 
 type anthropicContent struct {
-	Type     string           `json:"type"`
-	Text     string           `json:"text,omitempty"`
-	Thinking string           `json:"thinking,omitempty"`
-	Source   *anthropicSource `json:"source,omitempty"`
-	ID       string           `json:"id,omitempty"`
-	Name     string           `json:"name,omitempty"`
-	Input    map[string]any   `json:"input,omitempty"`
-	ToolUseID string          `json:"tool_use_id,omitempty"`
+	Type      string           `json:"type"`
+	Text      string           `json:"text,omitempty"`
+	Thinking  string           `json:"thinking,omitempty"`
+	Source    *anthropicSource `json:"source,omitempty"`
+	ID        string           `json:"id,omitempty"`
+	Name      string           `json:"name,omitempty"`
+	Input     map[string]any   `json:"input,omitempty"`
+	ToolUseID string           `json:"tool_use_id,omitempty"`
 	// Content is a tool_result's payload: the API takes a plain string or an
 	// array of text/image blocks, so this holds a string or
 	// []anthropicContent (nil omits the key, the shape an empty result has
@@ -157,7 +157,7 @@ func streamAnthropic(ctx context.Context, model Model, req Request, opts StreamO
 		httpReq.Header.Set("anthropic-beta", "prompt-caching-2024-07-31")
 	}
 
-	client := &http.Client{}
+	client := newHTTPClient(0)
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		// Network errors (connection refused, timeout, DNS failure, etc.) are retryable
