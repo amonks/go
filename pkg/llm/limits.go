@@ -57,7 +57,10 @@ func ModelLimits(ctx context.Context, model Model) (Limits, error) {
 	if model.APIKey != "" {
 		req.Header.Set("x-api-key", model.APIKey)
 	}
-	resp, err := limitsClient.Do(req)
+	// The 30s timeout bounds the metadata GET; unlike a completion
+	// stream, it has no business taking long. The client is built per
+	// call so it sees the Transport the host installed after init.
+	resp, err := newHTTPClient(30 * time.Second).Do(req)
 	if err != nil {
 		return Limits{}, fmt.Errorf("model limits: %w", err)
 	}
@@ -81,10 +84,6 @@ func ModelLimits(ctx context.Context, model Model) (Limits, error) {
 	}
 	return Limits{ContextWindow: out.MaxInputTokens, MaxTokens: out.MaxTokens}, nil
 }
-
-// limitsClient bounds the metadata GET; unlike a completion stream, it
-// has no business taking long.
-var limitsClient = newHTTPClient(30 * time.Second)
 
 // ErrNoLimits reports a provider that publishes no per-model limits.
 var ErrNoLimits = errors.New("llm: provider publishes no model limits")
