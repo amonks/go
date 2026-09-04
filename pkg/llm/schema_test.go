@@ -56,6 +56,40 @@ func TestGenerateSchema_WithDescriptions(t *testing.T) {
 	}
 }
 
+// A description is prose, and prose has commas. The tag's option separator
+// is also a comma, so the description runs until the next option keyword
+// rather than the next comma — otherwise "One short, specific sentence"
+// reaches the model as "One short".
+func TestGenerateSchema_DescriptionKeepsCommas(t *testing.T) {
+	type Params struct {
+		Reason string  `json:"reason" jsonschema:"description=One short, specific sentence, with commas"`
+		Op     string  `json:"op" jsonschema:"description=The operation, one of the listed ones,enum=add,enum=sub"`
+		Note   *string `json:"note" jsonschema:"description=Optional, but welcome,required"`
+		Tail   string  `json:"tail" jsonschema:"enum=a,description=Trailing, comma-bearing"`
+	}
+
+	schema := GenerateSchema(Params{})
+
+	if got, want := schema.Properties["reason"].Description, "One short, specific sentence, with commas"; got != want {
+		t.Errorf("reason.Description = %q, want %q", got, want)
+	}
+	if got, want := schema.Properties["op"].Description, "The operation, one of the listed ones"; got != want {
+		t.Errorf("op.Description = %q, want %q", got, want)
+	}
+	if got, want := schema.Properties["op"].Enum, []string{"add", "sub"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("op.Enum = %v, want %v", got, want)
+	}
+	if got, want := schema.Properties["note"].Description, "Optional, but welcome"; got != want {
+		t.Errorf("note.Description = %q, want %q", got, want)
+	}
+	if !slices.Contains(schema.Required, "note") {
+		t.Errorf("note should be required; Required = %v", schema.Required)
+	}
+	if got, want := schema.Properties["tail"].Description, "Trailing, comma-bearing"; got != want {
+		t.Errorf("tail.Description = %q, want %q", got, want)
+	}
+}
+
 func TestGenerateSchema_WithEnums(t *testing.T) {
 	type Params struct {
 		Operation string `json:"operation" jsonschema:"enum=add,enum=subtract,enum=multiply,enum=divide"`

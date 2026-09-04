@@ -20,10 +20,12 @@ type Schema struct {
 // It uses the json tag for property names and the jsonschema tag for
 // additional schema information like descriptions and enums.
 //
-// Supported jsonschema tag options:
-//   - description=<text>: Sets the property description
+// Supported jsonschema tag options, comma-separated:
+//   - description=<text>: Sets the property description. The text runs until
+//     the next option keyword, so it may itself contain commas.
 //   - enum=<value>: Adds an enum value (can be repeated)
 //   - required: Marks the field as required (default for non-pointer fields)
+//   - optional: Marks a non-pointer field as not required
 //
 // Example:
 //
@@ -97,20 +99,16 @@ func generateStructSchema(t reflect.Type) *Schema {
 		name := getJSONName(field, jsonTag)
 		propSchema := generateSchemaForType(field.Type)
 
-		// Parse jsonschema tag
-		jsTag := field.Tag.Get("jsonschema")
-		if jsTag != "" {
-			parseJSONSchemaTag(jsTag, propSchema)
-		}
+		opts := parseJSONSchemaTag(field.Tag.Get("jsonschema"), propSchema)
 
 		schema.Properties[name] = propSchema
 
 		// Non-pointer fields are required by default unless explicitly optional
-		if field.Type.Kind() != reflect.Pointer && !strings.Contains(jsTag, "optional") {
+		if field.Type.Kind() != reflect.Pointer && !opts.optional {
 			schema.Required = append(schema.Required, name)
 		}
 		// Pointer fields with "required" tag are also required
-		if field.Type.Kind() == reflect.Pointer && strings.Contains(jsTag, "required") {
+		if field.Type.Kind() == reflect.Pointer && opts.required {
 			schema.Required = append(schema.Required, name)
 		}
 	}
@@ -129,15 +127,38 @@ func getJSONName(field reflect.StructField, jsonTag string) string {
 	return parts[0]
 }
 
-func parseJSONSchemaTag(tag string, schema *Schema) {
-	parts := strings.SplitSeq(tag, ",")
-	for part := range parts {
-		part = strings.TrimSpace(part)
-		if after, ok := strings.CutPrefix(part, "description="); ok {
-			schema.Description = after
-		} else if after, ok := strings.CutPrefix(part, "enum="); ok {
-			enumVal := after
-			schema.Enum = append(schema.Enum, enumVal)
+// tagOptions are the flag options a jsonschema tag carried.
+type tagOptions struct {
+	required bool
+	optional bool
+}
+
+// parseJSONSchemaTag fills schema from a jsonschema struct tag and returns
+// its flags. Options are comma-separated, but a description is prose and
+// prose has commas: a comma-separated piece that is not itself an option
+// keyword continues the description before it, comma restored. So the
+// description runs to the next option keyword, not the next comma.
+func parseJSONSchemaTag(tag string, schema *Schema) tagOptions {
+	var opts tagOptions
+	inDescription := false
+	for part := range strings.SplitSeq(tag, ",") {
+		trimmed := strings.TrimSpace(part)
+		switch {
+		case strings.HasPrefix(trimmed, "description="):
+			schema.Description = strings.TrimPrefix(trimmed, "description=")
+			inDescription = true
+			continue
+		case strings.HasPrefix(trimmed, "enum="):
+			schema.Enum = append(schema.Enum, strings.TrimPrefix(trimmed, "enum="))
+		case trimmed == "required":
+			opts.required = true
+		case trimmed == "optional":
+			opts.optional = true
+		case inDescription:
+			schema.Description += "," + part
+			continue
 		}
+		inDescription = false
 	}
+	return opts
 }
