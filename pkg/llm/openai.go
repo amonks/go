@@ -415,6 +415,7 @@ func processOpenAIStream(ctx context.Context, body io.ReadCloser, model Model, e
 			partial.Usage.Total = chunk.Usage.TotalTokens
 			if chunk.Usage.PromptTokensDetails != nil {
 				partial.Usage.CacheRead = chunk.Usage.PromptTokensDetails.CachedTokens
+				partial.Usage.Input -= partial.Usage.CacheRead
 			}
 		}
 
@@ -484,7 +485,7 @@ func processOpenAIStream(ctx context.Context, body io.ReadCloser, model Model, e
 						var args map[string]any
 						json.Unmarshal([]byte(builder.arguments), &args)
 						// Update the tool call in content using tracked content index
-						if builder.contentIdx < len(partial.Content) {
+						if builder.contentIdx >= 0 && builder.contentIdx < len(partial.Content) {
 							if toolCall, ok := partial.Content[builder.contentIdx].(ToolCall); ok {
 								toolCall.Arguments = args
 								partial.Content[builder.contentIdx] = toolCall
@@ -522,14 +523,21 @@ func mapOpenAIFinishReason(reason string) StopReason {
 // OpenAI Responses API types
 
 type responsesAPIRequest struct {
-	Model           string             `json:"model"`
-	Input           any                `json:"input"` // string or []map[string]any
-	Instructions    string             `json:"instructions,omitempty"`
-	MaxOutputTokens int                `json:"max_output_tokens,omitempty"`
-	Temperature     *float64           `json:"temperature,omitempty"`
-	Stream          bool               `json:"stream"`
-	Tools           []responsesAPITool `json:"tools,omitempty"`
-	ToolChoice      any                `json:"tool_choice,omitempty"`
+	Store           bool                `json:"store"`
+	Include         []string            `json:"include"`
+	Reasoning       *responsesReasoning `json:"reasoning,omitempty"`
+	Model           string              `json:"model"`
+	Input           any                 `json:"input"` // string or []map[string]any
+	Instructions    string              `json:"instructions,omitempty"`
+	MaxOutputTokens int                 `json:"max_output_tokens,omitempty"`
+	Temperature     *float64            `json:"temperature,omitempty"`
+	Stream          bool                `json:"stream"`
+	Tools           []responsesAPITool  `json:"tools,omitempty"`
+	ToolChoice      any                 `json:"tool_choice,omitempty"`
+}
+
+type responsesReasoning struct {
+	Effort string `json:"effort"`
 }
 
 type responsesContentPart struct {
@@ -547,7 +555,10 @@ type responsesAPITool struct {
 
 // Responses API stream event types
 type responsesStreamEvent struct {
-	Type string `json:"type"`
+	Refusal string `json:"refusal,omitempty"`
+	Code    string `json:"code,omitempty"`
+	Message string `json:"message,omitempty"`
+	Type    string `json:"type"`
 
 	// Common routing fields present on many streaming events
 	ResponseID  string `json:"response_id,omitempty"`
@@ -564,6 +575,10 @@ type responsesStreamEvent struct {
 }
 
 type responsesObj struct {
+	Error             *responsesError `json:"error,omitempty"`
+	IncompleteDetails *struct {
+		Reason string `json:"reason"`
+	} `json:"incomplete_details,omitempty"`
 	ID     string          `json:"id"`
 	Status string          `json:"status"`
 	Model  string          `json:"model"`
@@ -571,20 +586,29 @@ type responsesObj struct {
 	Usage  *responsesUsage `json:"usage,omitempty"`
 }
 
+type responsesError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
 type responsesItem struct {
-	ID        string          `json:"id"`
-	Type      string          `json:"type"` // "message", "function_call"
-	Status    string          `json:"status"`
-	Role      string          `json:"role,omitempty"`
-	Content   []responsesPart `json:"content,omitempty"`
-	Name      string          `json:"name,omitempty"`      // for function_call
-	CallID    string          `json:"call_id,omitempty"`   // for function_call
-	Arguments string          `json:"arguments,omitempty"` // for function_call
+	Phase            string          `json:"phase,omitempty"`
+	EncryptedContent string          `json:"encrypted_content,omitempty"`
+	Summary          []responsesPart `json:"summary,omitempty"`
+	ID               string          `json:"id"`
+	Type             string          `json:"type"` // "message", "function_call"
+	Status           string          `json:"status"`
+	Role             string          `json:"role,omitempty"`
+	Content          []responsesPart `json:"content,omitempty"`
+	Name             string          `json:"name,omitempty"`      // for function_call
+	CallID           string          `json:"call_id,omitempty"`   // for function_call
+	Arguments        string          `json:"arguments,omitempty"` // for function_call
 }
 
 type responsesPart struct {
-	Type string `json:"type"` // "output_text"
-	Text string `json:"text"`
+	Refusal string `json:"refusal,omitempty"`
+	Type    string `json:"type"` // "output_text"
+	Text    string `json:"text"`
 }
 
 type responsesInputTokensDetails struct {
@@ -602,7 +626,7 @@ type responsesUsage struct {
 func streamOpenAIResponses(ctx context.Context, model Model, req Request, opts StreamOptions) (*StreamHandle, error) {
 	responsesReq, err := convertToResponsesRequest(model, req, opts)
 	if err != nil {
-		return nil, err
+		return nil, &retryableError{err: err, retryable: false}
 	}
 
 	body, err := json.Marshal(responsesReq)
@@ -661,8 +685,9 @@ func streamOpenAIResponses(ctx context.Context, model Model, req Request, opts S
 
 func convertToResponsesRequest(model Model, req Request, opts StreamOptions) (responsesAPIRequest, error) {
 	responsesReq := responsesAPIRequest{
-		Model:  model.ID,
-		Stream: true,
+		Model:   model.ID,
+		Stream:  true,
+		Include: []string{"reasoning.encrypted_content"},
 	}
 
 	// Optional here; omitted, the provider applies its own default.
@@ -672,8 +697,17 @@ func convertToResponsesRequest(model Model, req Request, opts StreamOptions) (re
 	}
 	responsesReq.MaxOutputTokens = limit
 
-	// Set temperature
+	effort, err := responsesReasoningEffort(model.ID, opts.ThinkingLevel)
+	if err != nil {
+		return responsesAPIRequest{}, err
+	}
+	if effort != "" {
+		responsesReq.Reasoning = &responsesReasoning{Effort: effort}
+	}
 	if opts.Temperature != nil {
+		if !responsesSupportsTemperature(model.ID, effort) {
+			return responsesAPIRequest{}, fmt.Errorf("OpenAI model %s does not support temperature with reasoning effort %q", model.ID, effort)
+		}
 		responsesReq.Temperature = opts.Temperature
 	}
 
@@ -683,7 +717,7 @@ func convertToResponsesRequest(model Model, req Request, opts StreamOptions) (re
 	}
 
 	// Convert messages to input
-	responsesReq.Input = convertMessagesToResponsesInput(req.Messages)
+	responsesReq.Input = convertMessagesToResponsesInputForModel(model, req.Messages)
 
 	// Convert tools
 	for _, tool := range req.Tools {
@@ -697,6 +731,9 @@ func convertToResponsesRequest(model Model, req Request, opts StreamOptions) (re
 
 	// Force a specific tool when requested, for schema-constrained output.
 	if req.ToolChoice != "" {
+		if len(responsesEfforts(model.ID)) == 0 {
+			return responsesAPIRequest{}, fmt.Errorf("OpenAI model %s has no documented forced-tool capability", model.ID)
+		}
 		responsesReq.ToolChoice = map[string]any{"type": "function", "name": req.ToolChoice}
 	}
 
@@ -704,6 +741,10 @@ func convertToResponsesRequest(model Model, req Request, opts StreamOptions) (re
 }
 
 func convertMessagesToResponsesInput(messages []Message) any {
+	return convertMessagesToResponsesInputForModel(Model{}, messages)
+}
+
+func convertMessagesToResponsesInputForModel(model Model, messages []Message) any {
 	// If just a single user message with text, we can use simple string input.
 	// As soon as there is any multi-turn context (assistant messages, tool calls,
 	// tool results, images), we must use the structured array form.
@@ -797,6 +838,15 @@ func convertMessagesToResponsesInput(messages []Message) any {
 			for _, block := range m.Content {
 				switch b := block.(type) {
 				case TextContent:
+					if b.Message != nil && b.Message.API == APIOpenAIResponses && b.Message.Model == model.ID && b.Message.Provider == model.Provider && b.Message.BaseURL == model.BaseURL {
+						flushText()
+						item := map[string]any{"role": "assistant", "content": b.Text}
+						if b.Message.Phase != "" {
+							item["phase"] = b.Message.Phase
+						}
+						items = append(items, item)
+						continue
+					}
 					if strings.TrimSpace(b.Text) != "" {
 						textParts = append(textParts, b.Text)
 					}
@@ -805,6 +855,14 @@ func convertMessagesToResponsesInput(messages []Message) any {
 					// history coherent across APIs.
 					if strings.TrimSpace(b.Thinking) != "" {
 						textParts = append(textParts, b.Thinking)
+					}
+				case OpaqueContent:
+					if b.API == APIOpenAIResponses && b.Model == model.ID && b.Provider == model.Provider && b.BaseURL == model.BaseURL {
+						var item responsesItem
+						if json.Unmarshal(b.Data, &item) == nil && item.Type == "reasoning" && item.EncryptedContent != "" {
+							flushText()
+							items = append(items, json.RawMessage(b.Data))
+						}
 					}
 				case ToolCall:
 					flushText()
@@ -858,8 +916,29 @@ func processResponsesStream(ctx context.Context, body io.ReadCloser, model Model
 	partial.Provider = model.Provider
 	partial.Timestamp = time.Now()
 
+	fail := func(err error) {
+		partial.StopReason = StopReasonError
+		partial.ErrorMessage = err.Error()
+		events <- ErrorEvent{Reason: StopReasonError, Message: partial}
+		errCh <- err
+	}
+	finish := func() {
+		partial.Usage.Cost = calculateCost(partial.Usage, model.Cost)
+		events <- DoneEvent{Reason: partial.StopReason, Message: partial}
+		done <- partial
+	}
 	hasStarted := false
-	textContentIdx := -1
+	reasoningIndices := make(map[string]int)
+	textIndices := make(map[string]int)
+	ensureText := func(id string) int {
+		if i, ok := textIndices[id]; ok {
+			return i
+		}
+		i := len(partial.Content)
+		partial.Content = append(partial.Content, TextContent{Type: "text"})
+		textIndices[id] = i
+		return i
+	}
 
 	// Track tool calls being built
 	type toolCallBuilder struct {
@@ -881,10 +960,11 @@ func processResponsesStream(ctx context.Context, body io.ReadCloser, model Model
 		}
 
 		line, err := reader.ReadString('\n')
-		if err == io.EOF {
-			break
+		if err == io.EOF && len(line) == 0 {
+			fail(fmt.Errorf("OpenAI Responses stream ended before a terminal event"))
+			return
 		}
-		if err != nil {
+		if err != nil && err != io.EOF {
 			partial.StopReason = StopReasonError
 			partial.ErrorMessage = err.Error()
 			events <- ErrorEvent{Reason: StopReasonError, Message: partial}
@@ -899,15 +979,20 @@ func processResponsesStream(ctx context.Context, body io.ReadCloser, model Model
 			continue
 		}
 
-		if !strings.HasPrefix(line, "data: ") {
+		if !strings.HasPrefix(line, "data:") {
 			continue
 		}
 
-		data := strings.TrimPrefix(line, "data: ")
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 
 		var event responsesStreamEvent
 		if err := json.Unmarshal([]byte(data), &event); err != nil {
-			continue
+			fail(fmt.Errorf("decode OpenAI Responses event: %w", err))
+			return
+		}
+		if event.Type == "" {
+			fail(fmt.Errorf("decode OpenAI Responses event: missing type"))
+			return
 		}
 
 		switch event.Type {
@@ -917,19 +1002,23 @@ func processResponsesStream(ctx context.Context, body io.ReadCloser, model Model
 				events <- StartEvent{Partial: partial}
 			}
 
-		case "response.output_text.delta":
-			if textContentIdx == -1 {
-				textContentIdx = len(partial.Content)
-				partial.Content = append(partial.Content, TextContent{Type: "text", Text: ""})
+		case "response.output_text.delta", "response.refusal.delta":
+			i := ensureText(event.ItemID)
+			block := partial.Content[i].(TextContent)
+			block.Text += event.Delta
+			partial.Content[i] = block
+			events <- TextDeltaEvent{ContentIndex: i, Delta: event.Delta, Partial: partial}
+		case "response.refusal.done":
+			i := ensureText(event.ItemID)
+			block := partial.Content[i].(TextContent)
+			previous := block.Text
+			block.Text = event.Refusal
+			partial.Content[i] = block
+			if strings.HasPrefix(block.Text, previous) && len(block.Text) > len(previous) {
+				events <- TextDeltaEvent{ContentIndex: i, Delta: block.Text[len(previous):], Partial: partial}
 			}
-			if tc, ok := partial.Content[textContentIdx].(TextContent); ok {
-				tc.Text += event.Delta
-				partial.Content[textContentIdx] = tc
-				events <- TextDeltaEvent{ContentIndex: textContentIdx, Delta: event.Delta, Partial: partial}
-			}
-
 		case "response.output_text.done":
-			// Text is finalized, nothing special to do
+			// The message's completed output item supplies its final text and phase.
 
 		case "response.function_call_arguments.delta":
 			// Function call arguments stream separately and reference the tool item by item_id.
@@ -958,6 +1047,14 @@ func processResponsesStream(ctx context.Context, body io.ReadCloser, model Model
 			}
 
 		case "response.output_item.added":
+			if event.Item != nil && event.Item.Type == "message" {
+				i := ensureText(event.Item.ID)
+				partial.Content[i] = responsesMessageText(model, *event.Item)
+			}
+			if event.Item != nil && event.Item.Type == "reasoning" {
+				reasoningIndices[event.Item.ID] = len(partial.Content)
+				partial.Content = append(partial.Content, OpaqueContent{Type: "opaque", API: APIOpenAIResponses, Provider: model.Provider, Model: model.ID, BaseURL: model.BaseURL})
+			}
 			if event.Item != nil && event.Item.Type == "function_call" {
 				contentIdx := len(partial.Content)
 				builder := &toolCallBuilder{
@@ -975,12 +1072,36 @@ func processResponsesStream(ctx context.Context, body io.ReadCloser, model Model
 			}
 
 		case "response.output_item.done":
+			if event.Item != nil && event.Item.Type == "message" {
+				i := ensureText(event.Item.ID)
+				partial.Content[i] = responsesMessageText(model, *event.Item)
+			}
+			if event.Item != nil && event.Item.Type == "reasoning" {
+				var raw struct {
+					Item json.RawMessage `json:"item"`
+				}
+				json.Unmarshal([]byte(data), &raw)
+				block := OpaqueContent{Type: "opaque", API: APIOpenAIResponses, Provider: model.Provider, Model: model.ID, BaseURL: model.BaseURL, Data: raw.Item}
+				if i, ok := reasoningIndices[event.Item.ID]; ok {
+					partial.Content[i] = block
+				} else {
+					reasoningIndices[event.Item.ID] = len(partial.Content)
+					partial.Content = append(partial.Content, block)
+				}
+			}
 			if event.Item != nil && event.Item.Type == "function_call" {
 				builder := toolCalls[event.Item.ID]
 				if builder != nil {
 					var args map[string]any
-					json.Unmarshal([]byte(builder.arguments), &args)
-					if builder.contentIdx < len(partial.Content) {
+					if event.Item.Arguments != "" {
+						builder.arguments = event.Item.Arguments
+					}
+					// An exhausted output budget may end a call in the middle of
+					// its JSON. Keep it incomplete until the terminal status is known.
+					if err := json.Unmarshal([]byte(builder.arguments), &args); err != nil {
+						args = nil
+					}
+					if builder.contentIdx >= 0 && builder.contentIdx < len(partial.Content) {
 						if toolCall, ok := partial.Content[builder.contentIdx].(ToolCall); ok {
 							toolCall.Arguments = args
 							partial.Content[builder.contentIdx] = toolCall
@@ -990,40 +1111,115 @@ func processResponsesStream(ctx context.Context, body io.ReadCloser, model Model
 				}
 			}
 
-		case "response.completed":
-			if event.Response != nil {
-				// Extract usage
-				if event.Response.Usage != nil {
-					partial.Usage.Input = event.Response.Usage.InputTokens
-					partial.Usage.Output = event.Response.Usage.OutputTokens
-					partial.Usage.Total = event.Response.Usage.TotalTokens
-					if event.Response.Usage.InputTokensDetails != nil {
-						partial.Usage.CacheRead = event.Response.Usage.InputTokensDetails.CachedTokens
-					}
-				}
-
-				// Determine stop reason
-				switch event.Response.Status {
-				case "completed":
-					if len(toolCalls) > 0 {
-						partial.StopReason = StopReasonToolUse
-					} else {
-						partial.StopReason = StopReasonEnd
-					}
-				case "incomplete":
-					partial.StopReason = StopReasonMaxTokens
-				default:
-					partial.StopReason = StopReasonEnd
+		case "error":
+			fail(fmt.Errorf("OpenAI Responses error %s: %s", event.Code, event.Message))
+			return
+		case "response.failed", "response.completed", "response.incomplete":
+			response := event.Response
+			if response == nil {
+				fail(fmt.Errorf("OpenAI Responses terminal event %s has no response", event.Type))
+				return
+			}
+			if response.Usage != nil {
+				partial.Usage.Input = response.Usage.InputTokens
+				partial.Usage.Output = response.Usage.OutputTokens
+				partial.Usage.Total = response.Usage.TotalTokens
+				if response.Usage.InputTokensDetails != nil {
+					partial.Usage.CacheRead = response.Usage.InputTokensDetails.CachedTokens
+					partial.Usage.Input -= partial.Usage.CacheRead
 				}
 			}
+			if event.Type == "response.failed" || response.Error != nil {
+				detail := "response failed"
+				if response.Error != nil {
+					detail = response.Error.Code + ": " + response.Error.Message
+				}
+				fail(fmt.Errorf("OpenAI Responses %s", detail))
+				return
+			}
+			if event.Type == "response.incomplete" {
+				if response.Status != "incomplete" {
+					fail(fmt.Errorf("OpenAI Responses inconsistent terminal status %q", response.Status))
+					return
+				}
+				reason := "unknown"
+				if response.IncompleteDetails != nil {
+					reason = response.IncompleteDetails.Reason
+				}
+				if reason != "max_output_tokens" {
+					fail(fmt.Errorf("OpenAI Responses incomplete: %s", reason))
+					return
+				}
+				partial.StopReason = StopReasonMaxTokens
+			} else {
+				if response.Status != "completed" {
+					fail(fmt.Errorf("OpenAI Responses inconsistent terminal status %q", response.Status))
+					return
+				}
+				partial.StopReason = StopReasonEnd
+				if len(toolCalls) > 0 {
+					partial.StopReason = StopReasonToolUse
+				}
+			}
+			// The terminal output is authoritative, including reasoning item fields
+			// unavailable in deltas. Keep original JSON for opaque provider items.
+			if response.Output != nil {
+				var raw struct {
+					Response struct {
+						Output []json.RawMessage `json:"output"`
+					} `json:"response"`
+				}
+				json.Unmarshal([]byte(data), &raw)
+				content := make([]ContentBlock, 0, len(response.Output))
+				for i, item := range response.Output {
+					switch item.Type {
+					case "reasoning":
+						content = append(content, OpaqueContent{Type: "opaque", API: APIOpenAIResponses, Provider: model.Provider, Model: model.ID, BaseURL: model.BaseURL, Data: raw.Response.Output[i]})
+					case "message":
+						content = append(content, responsesMessageText(model, item))
+					case "function_call":
+						var args map[string]any
+						err := json.Unmarshal([]byte(item.Arguments), &args)
+						if err != nil || args == nil {
+							if partial.StopReason != StopReasonMaxTokens {
+								fail(fmt.Errorf("invalid OpenAI function arguments for %s", item.Name))
+								return
+							}
+							args = nil
+						}
+						content = append(content, ToolCall{Type: "toolCall", ID: item.CallID, Name: item.Name, Arguments: args})
+						if partial.StopReason == StopReasonEnd {
+							partial.StopReason = StopReasonToolUse
+						}
+					}
+				}
+				partial.Content = content
+			}
+			if partial.StopReason != StopReasonMaxTokens {
+				for _, block := range partial.Content {
+					if call, ok := block.(ToolCall); ok && call.Arguments == nil {
+						fail(fmt.Errorf("invalid OpenAI function arguments for %s", call.Name))
+						return
+					}
+				}
+			}
+			finish()
+			return
 		}
 	}
+}
 
-	// Calculate costs
-	partial.Usage.Cost = calculateCost(partial.Usage, model.Cost)
-	if partial.StopReason == "" {
-		partial.StopReason = StopReasonEnd
+// One TextContent is one Responses assistant message, including its phase.
+// Refusals are visible explanations, not empty successful answers.
+func responsesMessageText(model Model, item responsesItem) TextContent {
+	var texts []string
+	for _, part := range item.Content {
+		switch part.Type {
+		case "output_text":
+			texts = append(texts, part.Text)
+		case "refusal":
+			texts = append(texts, part.Refusal)
+		}
 	}
-	events <- DoneEvent{Reason: partial.StopReason, Message: partial}
-	done <- partial
+	return TextContent{Type: "text", Text: strings.Join(texts, "\n"), Message: &MessageMetadata{API: APIOpenAIResponses, Provider: model.Provider, Model: model.ID, BaseURL: model.BaseURL, Phase: item.Phase}}
 }

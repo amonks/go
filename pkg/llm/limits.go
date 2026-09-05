@@ -14,14 +14,15 @@ import (
 // the caller named one, the model's ceiling when it asked for MaxOutput,
 // else the model's ceiling if known and 0 — no cap, the provider's own
 // default — if not. Naming a number and asking for the ceiling at once
-// is a contradiction, as is asking for a ceiling nobody knows.
+// is a contradiction. OpenAI can choose its own limit when none is published;
+// APIs without that contract still require a known ceiling.
 func (opts StreamOptions) outputLimit(model Model) (int, error) {
 	switch {
 	case opts.MaxTokens != nil && opts.MaxOutput:
 		return 0, errors.New("llm: MaxTokens and MaxOutput are exclusive")
 	case opts.MaxTokens != nil:
 		return *opts.MaxTokens, nil
-	case opts.MaxOutput && model.MaxTokens == 0:
+	case opts.MaxOutput && model.MaxTokens == 0 && model.API != APIOpenAIResponses && model.API != APIOpenAICompletions:
 		return 0, fmt.Errorf("llm: MaxOutput asked of %s, whose output ceiling is unknown", model.ID)
 	default:
 		return model.MaxTokens, nil

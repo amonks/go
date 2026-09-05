@@ -4,7 +4,10 @@
 // tool schema generation, and provider implementations for Anthropic and OpenAI.
 package llm
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // API represents the API style used by a provider.
 type API string
@@ -82,11 +85,24 @@ func (ToolResultMessage) message() {}
 
 // TextContent represents text content in a message.
 type TextContent struct {
-	Type string // "text"
-	Text string
+	// Message marks one provider assistant message boundary and its replay phase.
+	// Other adapters ignore it while retaining Text.
+	Message *MessageMetadata `json:"message,omitempty"`
+	Type    string           // "text"
+	Text    string
 }
 
 func (TextContent) contentBlock() {}
+
+// MessageMetadata preserves provider message semantics for stateless replay.
+// It applies only when the originating API, provider, endpoint, and model match.
+type MessageMetadata struct {
+	API      API    `json:"api"`
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+	BaseURL  string `json:"base_url,omitempty"`
+	Phase    string `json:"phase,omitempty"`
+}
 
 // ThinkingContent represents thinking/reasoning content from the model.
 type ThinkingContent struct {
@@ -95,6 +111,20 @@ type ThinkingContent struct {
 }
 
 func (ThinkingContent) contentBlock() {}
+
+// OpaqueContent carries provider state without exposing it as text. Adapters
+// replay it only for the originating API, provider, endpoint, and model.
+// Data contains one provider item; callers must preserve it in conversation history.
+type OpaqueContent struct {
+	Type     string          `json:"type"`
+	API      API             `json:"api"`
+	Provider string          `json:"provider"`
+	Model    string          `json:"model"`
+	BaseURL  string          `json:"base_url,omitempty"`
+	Data     json.RawMessage `json:"data"`
+}
+
+func (OpaqueContent) contentBlock() {}
 
 // ImageContent represents an image in a message.
 type ImageContent struct {
@@ -117,7 +147,7 @@ func (ToolCall) contentBlock() {}
 
 // Usage contains token counts and costs for a completion.
 type Usage struct {
-	Input      int // Input tokens
+	Input      int // Uncached input tokens (cache reads and writes are separate buckets)
 	Output     int // Output tokens
 	CacheRead  int // Tokens read from cache
 	CacheWrite int // Tokens written to cache
@@ -225,7 +255,8 @@ const (
 // StreamOptions contains options for streaming completions.
 //
 // Output is bounded by MaxTokens when the caller has a number in mind,
-// or by the model's own output ceiling when MaxOutput is set. The two
+// or by the model's own output ceiling when MaxOutput is set (OpenAI APIs
+// use their provider default when the ceiling is unknown). The two
 // are exclusive. With neither, the package sends the model's ceiling
 // where it knows one (Model.MaxTokens) and otherwise leaves the choice
 // to the provider — which OpenAI's APIs allow and Anthropic's does not,

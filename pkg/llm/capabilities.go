@@ -7,7 +7,9 @@ func (m Model) SupportsToolChoice() bool {
 	switch m.API {
 	case APIAnthropicMessages:
 		return !modelAlwaysThinks(m.ID)
-	case APIOpenAICompletions, APIOpenAIResponses:
+	case APIOpenAIResponses:
+		return len(responsesEfforts(m.ID)) > 0
+	case APIOpenAICompletions:
 		return true
 	default:
 		return false

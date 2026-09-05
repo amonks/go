@@ -24,6 +24,10 @@ func TestOutputLimit(t *testing.T) {
 		{"ceiling asked", StreamOptions{MaxOutput: true}, known, 128000, ""},
 		{"nothing said, ceiling known", StreamOptions{}, known, 128000, ""},
 		{"nothing said, ceiling unknown", StreamOptions{}, unknown, 0, ""},
+		{"Responses uses provider default", StreamOptions{MaxOutput: true}, Model{ID: "gpt", API: APIOpenAIResponses}, 0, ""},
+		{"Completions uses provider default", StreamOptions{MaxOutput: true}, Model{ID: "gpt", API: APIOpenAICompletions}, 0, ""},
+		{"Anthropic still needs a ceiling", StreamOptions{MaxOutput: true}, Model{ID: "claude", API: APIAnthropicMessages}, 0, "ceiling is unknown"},
+		{"OpenAI options remain exclusive", StreamOptions{MaxTokens: new(1), MaxOutput: true}, Model{API: APIOpenAIResponses}, 0, "exclusive"},
 		{"ceiling asked but unknown", StreamOptions{MaxOutput: true}, unknown, 0, "ceiling is unknown"},
 		{"both", StreamOptions{MaxTokens: new(1), MaxOutput: true}, known, 0, "exclusive"},
 	}
