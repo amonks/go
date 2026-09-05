@@ -69,6 +69,9 @@ func ModelLimits(ctx context.Context, model Model) (Limits, error) {
 	if err != nil {
 		return Limits{}, fmt.Errorf("model limits: %w", err)
 	}
+	if resp.StatusCode == http.StatusNotFound {
+		return Limits{}, fmt.Errorf("model limits: %s: %w", model.ID, ErrModelNotFound)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return Limits{}, fmt.Errorf("model limits: anthropic API error (status %d): %s", resp.StatusCode, body)
 	}
@@ -84,6 +87,9 @@ func ModelLimits(ctx context.Context, model Model) (Limits, error) {
 	}
 	return Limits{ContextWindow: out.MaxInputTokens, MaxTokens: out.MaxTokens}, nil
 }
+
+// ErrModelNotFound reports a model the provider does not recognize or expose.
+var ErrModelNotFound = errors.New("llm: model not found")
 
 // ErrNoLimits reports a provider that publishes no per-model limits.
 var ErrNoLimits = errors.New("llm: provider publishes no model limits")

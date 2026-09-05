@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -93,5 +94,14 @@ func TestModelLimits(t *testing.T) {
 	}
 	if _, err := ModelLimits(context.Background(), Model{ID: "gpt", API: APIOpenAIResponses}); err != ErrNoLimits {
 		t.Fatalf("openai: err = %v, want ErrNoLimits", err)
+	}
+}
+
+func TestModelLimitsUnknownModel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) }))
+	defer srv.Close()
+	_, err := ModelLimits(context.Background(), Model{ID: "missing", API: APIAnthropicMessages, BaseURL: srv.URL})
+	if !errors.Is(err, ErrModelNotFound) {
+		t.Fatalf("unknown model = %v", err)
 	}
 }
