@@ -122,7 +122,8 @@ const (
 type Option func(*options)
 
 type options struct {
-	budget time.Duration
+	budget     time.Duration
+	scrollbars bool
 	// execPath overrides the browser RequireChrome would resolve. Only
 	// the tests here set it, to exercise a launch that fails.
 	execPath string
@@ -141,6 +142,13 @@ func withExecPath(path string) Option {
 // headroom for a step that should have been bounded.
 func WithBudget(d time.Duration) Option {
 	return func(o *options) { o.budget = d }
+}
+
+// WithScrollbars keeps Chrome's scrollbars enabled. Use it for layout tests
+// whose measurements must include the space classic scrollbars occupy;
+// chromedp hides them by default.
+func WithScrollbars() Option {
+	return func(o *options) { o.scrollbars = true }
 }
 
 // Step caps one action at StepTimeout and names it in any error, so a
@@ -279,6 +287,7 @@ func newBrowser(t *testing.T, cleanup func(func()), opts ...Option) (context.Con
 			chromedp.ExecPath(chrome),
 			chromedp.UserDataDir(userDataDir),
 			chromedp.Flag("headless", "new"),
+			chromedp.Flag("hide-scrollbars", !cfg.scrollbars),
 			chromedp.Flag("disable-gpu", true),
 			chromedp.Flag("no-sandbox", true),
 			chromedp.WSURLReadTimeout(launchTimeout),
