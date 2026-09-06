@@ -251,16 +251,16 @@ func TestConvertToAnthropicRequest_ForcedToolRefusesThinking(t *testing.T) {
 		opts  StreamOptions
 		ok    bool
 	}{
-		"pre-adaptive, unset":     {"claude-haiku-4-5", StreamOptions{}, true},
-		"pre-adaptive, off":       {"claude-haiku-4-5", StreamOptions{ThinkingLevel: ThinkingOff}, true},
-		"pre-adaptive, thinking":  {"claude-haiku-4-5", StreamOptions{ThinkingLevel: ThinkingHigh}, false},
-		"adaptive, off":           {"claude-sonnet-5", StreamOptions{ThinkingLevel: ThinkingOff}, true},
-		"adaptive, unset":         {"claude-sonnet-5", StreamOptions{}, false},
-		"adaptive, thinking":      {"claude-sonnet-5", StreamOptions{ThinkingLevel: ThinkingLow}, false},
-		"always-thinking, off":    {"claude-fable-5", StreamOptions{ThinkingLevel: ThinkingOff}, false},
-		"always-thinking, unset":  {"claude-fable-5", StreamOptions{}, false},
+		"pre-adaptive, unset":    {"claude-haiku-4-5", StreamOptions{}, true},
+		"pre-adaptive, off":      {"claude-haiku-4-5", StreamOptions{ThinkingLevel: ThinkingOff}, true},
+		"pre-adaptive, thinking": {"claude-haiku-4-5", StreamOptions{ThinkingLevel: ThinkingHigh}, false},
+		"adaptive, off":          {"claude-sonnet-5", StreamOptions{ThinkingLevel: ThinkingOff}, true},
+		"adaptive, unset":        {"claude-sonnet-5", StreamOptions{}, false},
+		"adaptive, thinking":     {"claude-sonnet-5", StreamOptions{ThinkingLevel: ThinkingLow}, false},
+		"always-thinking, off":   {"claude-fable-5", StreamOptions{ThinkingLevel: ThinkingOff}, false},
+		"always-thinking, unset": {"claude-fable-5", StreamOptions{}, false},
 	} {
-		model := Model{ID: tc.model, MaxTokens: testCeiling}
+		model := Model{ID: tc.model, MaxTokens: 64000}
 		_, err := convertToAnthropicRequest(model, req, tc.opts)
 		if tc.ok && err != nil {
 			t.Errorf("%s: %v", name, err)
@@ -451,7 +451,7 @@ func TestConvertToAnthropicRequest_AdaptiveThinkingModels(t *testing.T) {
 
 	t.Run("older models keep enabled thinking with budget", func(t *testing.T) {
 		for _, id := range []string{"claude-haiku-4-5", "claude-sonnet-4-5", "claude-opus-4-5", "claude"} {
-			anthropicReq := mustAnthropicRequest(t, Model{ID: id}, req, StreamOptions{ThinkingLevel: ThinkingMedium})
+			anthropicReq := mustAnthropicRequest(t, Model{ID: id, MaxTokens: 64000}, req, StreamOptions{ThinkingLevel: ThinkingMedium})
 
 			if anthropicReq.Thinking == nil || anthropicReq.Thinking.Type != "enabled" {
 				t.Fatalf("%s: expected thinking type enabled, got %+v", id, anthropicReq.Thinking)
@@ -581,4 +581,23 @@ func mustAnthropicRequest(t *testing.T, model Model, req Request, opts StreamOpt
 		t.Fatal(err)
 	}
 	return out
+}
+
+func TestManualThinkingFitsOutputBudget(t *testing.T) {
+	model := Model{ID: "claude-haiku-4-5", API: APIAnthropicMessages, MaxTokens: 64000}
+	if model.SupportsThinkingLevel(ThinkingXHigh) {
+		t.Error("xhigh exceeds the published ceiling")
+	}
+	if model.SupportsThinkingLevel("max") || model.SupportsThinkingLevel("bogus") {
+		t.Error("invented Anthropic level")
+	}
+	if !model.SupportsThinkingLevel(ThinkingHigh) {
+		t.Error("high fits the ceiling")
+	}
+	for _, cap := range []int{32000, 32001} {
+		_, err := convertToAnthropicRequest(model, Request{}, StreamOptions{ThinkingLevel: ThinkingHigh, MaxTokens: &cap})
+		if (err != nil) != (cap == 32000) {
+			t.Errorf("cap %d: %v", cap, err)
+		}
+	}
 }

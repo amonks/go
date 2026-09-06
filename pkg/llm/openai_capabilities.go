@@ -55,6 +55,7 @@ func responsesReasoningEffort(id string, level ThinkingLevel) (string, error) {
 // SupportsThinkingLevel reports whether an adapter can honor the requested
 // setting. An empty level always leaves the provider's default in charge.
 // Unknown OpenAI model names cannot promise explicit reasoning settings.
+// Manual Anthropic budgets must fit MaxTokens when that ceiling is known.
 func (m Model) SupportsThinkingLevel(level ThinkingLevel) bool {
 	if level == "" {
 		return true
@@ -64,7 +65,14 @@ func (m Model) SupportsThinkingLevel(level ThinkingLevel) bool {
 		_, err := responsesReasoningEffort(m.ID, level)
 		return err == nil
 	case APIAnthropicMessages:
-		return level != ThinkingOff || !modelAlwaysThinks(m.ID)
+		switch level {
+		case ThinkingOff:
+			return !modelAlwaysThinks(m.ID)
+		case ThinkingMinimal, ThinkingLow, ThinkingMedium, ThinkingHigh, ThinkingXHigh:
+			return modelUsesAdaptiveThinking(m.ID) || m.MaxTokens == 0 || thinkingBudget(level) < m.MaxTokens
+		default:
+			return false
+		}
 	default:
 		return false
 	}
@@ -76,4 +84,16 @@ func responsesSupportsTemperature(id, effort string) bool {
 		return true
 	}
 	return effort == "none" && slices.Contains(supported, "none")
+}
+
+// ThinkingLevels lists the settings the adapter can honor, including the
+// empty setting that leaves the provider's default in charge.
+func (m Model) ThinkingLevels() []ThinkingLevel {
+	levels := []ThinkingLevel{""}
+	for _, level := range []ThinkingLevel{ThinkingOff, ThinkingMinimal, ThinkingLow, ThinkingMedium, ThinkingHigh, ThinkingXHigh, ThinkingMax} {
+		if m.SupportsThinkingLevel(level) {
+			levels = append(levels, level)
+		}
+	}
+	return levels
 }

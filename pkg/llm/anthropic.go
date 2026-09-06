@@ -240,6 +240,9 @@ func convertToAnthropicRequest(model Model, req Request, opts StreamOptions) (an
 			}
 		} else {
 			budget := thinkingBudget(opts.ThinkingLevel)
+			if budget >= limit {
+				return anthropicRequest{}, fmt.Errorf("anthropic thinking level %q requires max_tokens greater than its %d-token budget (got %d)", opts.ThinkingLevel, budget, limit)
+			}
 			anthropicReq.Thinking = &anthropicThinking{
 				Type:         "enabled",
 				BudgetTokens: budget,

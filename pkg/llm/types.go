@@ -250,6 +250,8 @@ const (
 	ThinkingHigh ThinkingLevel = "high"
 	// ThinkingXHigh enables extra-high thinking.
 	ThinkingXHigh ThinkingLevel = "xhigh"
+	// ThinkingMax requests the maximum effort on models supporting it.
+	ThinkingMax ThinkingLevel = "max"
 )
 
 // StreamOptions contains options for streaming completions.
