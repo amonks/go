@@ -170,3 +170,31 @@ func TestResponsesLocalValidationIsNotRetryable(t *testing.T) {
 		t.Fatal("unknown forced-tool capability accepted")
 	}
 }
+
+func TestResponsesGPT6SolAndLuna(t *testing.T) {
+	for _, id := range []string{"gpt-6-sol", "gpt-6-luna"} {
+		t.Run(id, func(t *testing.T) {
+			model := Model{ID: id, API: APIOpenAIResponses}
+			for _, level := range []ThinkingLevel{ThinkingOff, ThinkingLow, ThinkingMedium, ThinkingHigh, ThinkingXHigh, ThinkingMax} {
+				req, err := convertToResponsesRequest(model, Request{}, StreamOptions{ThinkingLevel: level})
+				if err != nil {
+					t.Errorf("%s: %v", level, err)
+					continue
+				}
+				want := string(level)
+				if level == ThinkingOff {
+					want = "none"
+				}
+				if req.Reasoning == nil || req.Reasoning.Effort != want {
+					t.Errorf("%s: reasoning = %+v, want %s", level, req.Reasoning, want)
+				}
+			}
+			if _, err := convertToResponsesRequest(model, Request{ToolChoice: "answer"}, StreamOptions{ThinkingLevel: ThinkingOff}); err != nil {
+				t.Errorf("forced tool with thinking off: %v", err)
+			}
+			if model.SupportsThinkingLevel(ThinkingMinimal) {
+				t.Error("unsupported minimal effort accepted")
+			}
+		})
+	}
+}

@@ -25,7 +25,7 @@ func responsesEfforts(id string) []string {
 		return []string{"none", "low", "medium", "high"}
 	case "gpt-5.2", "gpt-5.4", "gpt-5.5":
 		return []string{"none", "low", "medium", "high", "xhigh"}
-	case "gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna":
+	case "gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-sol", "gpt-6-luna":
 		return []string{"none", "low", "medium", "high", "xhigh", "max"}
 	case "gpt-6-astra":
 		return []string{"low", "medium", "high", "xhigh", "max"}

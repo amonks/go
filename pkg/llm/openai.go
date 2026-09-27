@@ -612,7 +612,8 @@ type responsesPart struct {
 }
 
 type responsesInputTokensDetails struct {
-	CachedTokens int `json:"cached_tokens"`
+	CachedTokens     int `json:"cached_tokens"`
+	CacheWriteTokens int `json:"cache_write_tokens"`
 }
 
 type responsesUsage struct {
@@ -1126,7 +1127,8 @@ func processResponsesStream(ctx context.Context, body io.ReadCloser, model Model
 				partial.Usage.Total = response.Usage.TotalTokens
 				if response.Usage.InputTokensDetails != nil {
 					partial.Usage.CacheRead = response.Usage.InputTokensDetails.CachedTokens
-					partial.Usage.Input -= partial.Usage.CacheRead
+					partial.Usage.CacheWrite = response.Usage.InputTokensDetails.CacheWriteTokens
+					partial.Usage.Input -= partial.Usage.CacheRead + partial.Usage.CacheWrite
 				}
 			}
 			if event.Type == "response.failed" || response.Error != nil {

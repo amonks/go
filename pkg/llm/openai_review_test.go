@@ -97,3 +97,24 @@ func TestResponsesStreamPreservesMessagePhase(t *testing.T) {
 		}
 	}
 }
+
+func TestResponsesCacheWritesAreExclusive(t *testing.T) {
+	for _, terminal := range []string{"completed", "incomplete"} {
+		t.Run(terminal, func(t *testing.T) {
+			events := make(chan StreamEvent, 100)
+			done := make(chan AssistantMessage, 1)
+			errs := make(chan error, 1)
+			model := Model{Cost: Cost{Input: 2, CacheRead: .2, CacheWrite: 2.5, Output: 10}}
+			stream := `data: {"type":"response.` + terminal + `","response":{"status":"` + terminal + `","incomplete_details":{"reason":"max_output_tokens"},"usage":{"input_tokens":12000,"output_tokens":100,"total_tokens":12100,"input_tokens_details":{"cached_tokens":4000,"cache_write_tokens":7000}}}}` + "\n"
+			processResponsesStream(context.Background(), io.NopCloser(strings.NewReader(stream)), model, events, done, errs)
+			select {
+			case msg := <-done:
+				if msg.Usage.Input != 1000 || msg.Usage.CacheRead != 4000 || msg.Usage.CacheWrite != 7000 || msg.Usage.Total != 12100 || math.Abs(msg.Usage.Cost.Total-.0213) > 1e-10 {
+					t.Fatalf("usage=%+v", msg.Usage)
+				}
+			default:
+				t.Fatal("missing terminal result")
+			}
+		})
+	}
+}
