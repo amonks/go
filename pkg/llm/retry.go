@@ -45,6 +45,7 @@ type retryableError struct {
 	err        error
 	retryable  bool
 	statusCode int
+	retryAfter time.Duration
 }
 
 func (e *retryableError) Error() string {
