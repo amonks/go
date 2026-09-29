@@ -238,7 +238,8 @@ const (
 type ThinkingLevel string
 
 const (
-	// ThinkingOff disables thinking.
+	// ThinkingOff disables thinking where supported. On Sonnet 5.5 it
+	// disables up-front thinking; progress between tool calls remains.
 	ThinkingOff ThinkingLevel = "off"
 	// ThinkingMinimal enables minimal thinking.
 	ThinkingMinimal ThinkingLevel = "minimal"

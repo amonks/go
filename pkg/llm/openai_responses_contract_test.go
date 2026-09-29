@@ -94,7 +94,7 @@ func TestResponsesRequestStatelessAndThinking(t *testing.T) {
 
 func TestOpaqueResponsesStateDoesNotReachOtherProviders(t *testing.T) {
 	messages := []Message{AssistantMessage{Content: []ContentBlock{OpaqueContent{API: APIOpenAIResponses, Model: "gpt-5.6-sol", Data: json.RawMessage(`{"type":"reasoning","encrypted_content":"secret-ciphertext"}`)}, TextContent{Text: "answer"}}}}
-	for name, value := range map[string]any{"chat": convertMessagesToOpenAI(nil, messages), "anthropic": convertMessagesToAnthropic(messages)} {
+	for name, value := range map[string]any{"chat": convertMessagesToOpenAI(nil, messages), "anthropic": convertMessagesToAnthropic(Model{}, messages)} {
 		b, err := json.Marshal(value)
 		if err != nil {
 			t.Fatal(err)

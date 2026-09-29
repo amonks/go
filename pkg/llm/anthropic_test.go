@@ -82,7 +82,7 @@ func TestConvertMessagesToAnthropic_MergesToolResults(t *testing.T) {
 		},
 	}
 
-	result := convertMessagesToAnthropic(messages)
+	result := convertMessagesToAnthropic(Model{}, messages)
 
 	// Should have 3 messages: user, assistant, user (with merged tool results)
 	if len(result) != 3 {
@@ -137,7 +137,7 @@ func TestConvertMessagesToAnthropic_ExcludesThinkingBlocks(t *testing.T) {
 		},
 	}
 
-	result := convertMessagesToAnthropic(messages)
+	result := convertMessagesToAnthropic(Model{}, messages)
 
 	if len(result) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(result))
@@ -193,7 +193,7 @@ func TestConvertMessagesToAnthropic_ToolResultsWithInterleaved(t *testing.T) {
 		},
 	}
 
-	result := convertMessagesToAnthropic(messages)
+	result := convertMessagesToAnthropic(Model{}, messages)
 
 	// Should have 5 messages: user, assistant, user(tool1), assistant, user(tool2)
 	if len(result) != 5 {
@@ -226,7 +226,7 @@ func TestConvertMessagesToAnthropic_EmptyAssistantMessageExcluded(t *testing.T) 
 		},
 	}
 
-	result := convertMessagesToAnthropic(messages)
+	result := convertMessagesToAnthropic(Model{}, messages)
 
 	// Should only have the user message since assistant message becomes empty
 	if len(result) != 1 {
@@ -480,12 +480,12 @@ func TestConvertToAnthropicRequest_AdaptiveThinkingModels(t *testing.T) {
 }
 
 func TestProcessAnthropicStream_UnknownBlockTypeDoesNotShiftIndices(t *testing.T) {
-	// A block type the parser doesn't recognize (e.g. redacted_thinking)
+	// A block type the parser doesn't recognize (e.g. future_block)
 	// must not desync the server's content indices from our accumulated
 	// content — the tool call at index 1 must still get its arguments.
 	stream := strings.Join([]string{
 		`data: {"type":"message_start","message":{"usage":{"input_tokens":10,"output_tokens":1}}}`,
-		`data: {"type":"content_block_start","index":0,"content_block":{"type":"redacted_thinking"}}`,
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"future_block"}}`,
 		`data: {"type":"content_block_stop","index":0}`,
 		`data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_1","name":"recommend"}}`,
 		`data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"recommendations\":"}}`,

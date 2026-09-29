@@ -78,7 +78,7 @@ func TestResponsesStreamPreservesMessagePhase(t *testing.T) {
 			t.Fatalf("phase replay=%v", input)
 		}
 	}
-	for name, value := range map[string]any{"chat": convertMessagesToOpenAI(nil, []Message{msg}), "anthropic": convertMessagesToAnthropic([]Message{msg})} {
+	for name, value := range map[string]any{"chat": convertMessagesToOpenAI(nil, []Message{msg}), "anthropic": convertMessagesToAnthropic(Model{}, []Message{msg})} {
 		b, err := json.Marshal(value)
 		if err != nil {
 			t.Fatal(err)

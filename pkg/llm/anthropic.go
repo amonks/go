@@ -43,6 +43,7 @@ type anthropicToolChoice struct {
 
 type anthropicThinking struct {
 	Type         string `json:"type"`
+	Display      string `json:"display,omitempty"`
 	BudgetTokens int    `json:"budget_tokens,omitempty"`
 }
 
@@ -54,7 +55,9 @@ type anthropicMessage struct {
 type anthropicContent struct {
 	Type      string           `json:"type"`
 	Text      string           `json:"text,omitempty"`
-	Thinking  string           `json:"thinking,omitempty"`
+	Thinking  *string          `json:"thinking,omitempty"`
+	Signature string           `json:"signature,omitempty"`
+	Data      string           `json:"data,omitempty"`
 	Source    *anthropicSource `json:"source,omitempty"`
 	ID        string           `json:"id,omitempty"`
 	Name      string           `json:"name,omitempty"`
@@ -111,6 +114,7 @@ type anthropicDelta struct {
 	Type        string `json:"type"`
 	Text        string `json:"text,omitempty"`
 	Thinking    string `json:"thinking,omitempty"`
+	Signature   string `json:"signature,omitempty"`
 	PartialJSON string `json:"partial_json,omitempty"`
 	StopReason  string `json:"stop_reason,omitempty"`
 }
@@ -228,8 +232,11 @@ func convertToAnthropicRequest(model Model, req Request, opts StreamOptions) (an
 		// default, which is the only level Opus 5 accepts alongside
 		// disabled thinking.) Before 4.6, omitting thinking already meant
 		// off, and Fable and Mythos think unconditionally and 400 on
-		// "disabled": both take the omission.
-		if modelUsesAdaptiveThinking(model.ID) && !modelAlwaysThinks(model.ID) {
+		// "disabled": both take the omission. Opus 5.5 also cannot disable
+		// thinking; Sonnet 5.5 uses between_tools for no up-front thinking.
+		if modelUsesBetweenTools(model.ID) {
+			anthropicReq.Thinking = &anthropicThinking{Type: "between_tools"}
+		} else if modelUsesAdaptiveThinking(model.ID) && !modelAlwaysThinks(model.ID) {
 			anthropicReq.Thinking = &anthropicThinking{Type: "disabled"}
 		}
 	case opts.ThinkingLevel != "":
@@ -253,8 +260,15 @@ func convertToAnthropicRequest(model Model, req Request, opts StreamOptions) (an
 		}
 	}
 
+	// Claude 5.5 omits thinking text by default, including progress between
+	// tool calls. Ask for summaries so streaming agent UIs keep showing it.
+	// between_tools already returns progress and accepts no display field.
+	if modelIsClaude55(model.ID) && (anthropicReq.Thinking == nil || anthropicReq.Thinking.Type == "adaptive") {
+		anthropicReq.Thinking = &anthropicThinking{Type: "adaptive", Display: "summarized"}
+	}
+
 	// Convert messages
-	anthropicReq.Messages = convertMessagesToAnthropic(req.Messages)
+	anthropicReq.Messages = convertMessagesToAnthropic(model, req.Messages)
 
 	// Convert tools
 	for _, tool := range req.Tools {
@@ -271,11 +285,12 @@ func convertToAnthropicRequest(model Model, req Request, opts StreamOptions) (an
 	// reason. A caller forcing a tool says ThinkingOff — on the adaptive
 	// families thinking is on unless the request disables it, so an
 	// unset level is thinking too — and a model that thinks
-	// unconditionally cannot take a forced tool at all.
+	// unconditionally cannot take a forced tool at all. Sonnet 5.5 also
+	// rejects forced tools, even with between_tools.
 	if req.ToolChoice != "" {
 		switch {
-		case modelAlwaysThinks(model.ID):
-			return anthropicRequest{}, fmt.Errorf("llm: %s thinks unconditionally and cannot take a forced tool (%s)", model.ID, req.ToolChoice)
+		case modelRejectsForcedTools(model.ID):
+			return anthropicRequest{}, fmt.Errorf("llm: %s cannot take a forced tool (%s)", model.ID, req.ToolChoice)
 		case opts.ThinkingLevel != ThinkingOff && (opts.ThinkingLevel != "" || modelUsesAdaptiveThinking(model.ID)):
 			return anthropicRequest{}, fmt.Errorf("llm: a forced tool (%s) needs ThinkingOff: the API refuses tool_choice beside extended thinking", req.ToolChoice)
 		}
@@ -365,8 +380,9 @@ func modelUsesAdaptiveThinking(modelID string) bool {
 
 // alwaysThinkingModelPrefixes lists the families whose thinking cannot be
 // turned off: an explicit {type: "disabled"} is a 400, so a request that
-// wants no thinking simply omits the parameter and gets thinking anyway.
+// wants no thinking still gets it (omitted, or adaptive with display).
 var alwaysThinkingModelPrefixes = []string{
+	"claude-opus-5-5",
 	"claude-fable-5",
 	"claude-mythos-5",
 }
@@ -380,6 +396,21 @@ func modelAlwaysThinks(modelID string) bool {
 	return false
 }
 
+// Claude 5.5 request differences are documented in each model's migration guide:
+// https://platform.claude.com/docs/en/models/opus-5-5/migration-guide
+// https://platform.claude.com/docs/en/models/sonnet-5-5/migration-guide
+func modelIsClaude55(id string) bool {
+	return strings.HasPrefix(id, "claude-opus-5-5") || modelUsesBetweenTools(id)
+}
+
+func modelUsesBetweenTools(id string) bool {
+	return strings.HasPrefix(id, "claude-sonnet-5-5")
+}
+
+func modelRejectsForcedTools(id string) bool {
+	return modelAlwaysThinks(id) || modelUsesBetweenTools(id)
+}
+
 // effortLevel maps a ThinkingLevel onto the adaptive-thinking effort scale.
 func effortLevel(level ThinkingLevel) string {
 	switch level {
@@ -391,6 +422,8 @@ func effortLevel(level ThinkingLevel) string {
 		return "high"
 	case ThinkingXHigh:
 		return "xhigh"
+	case ThinkingMax:
+		return "max"
 	default:
 		return "medium"
 	}
@@ -413,7 +446,7 @@ func thinkingBudget(level ThinkingLevel) int {
 	}
 }
 
-func convertMessagesToAnthropic(messages []Message) []anthropicMessage {
+func convertMessagesToAnthropic(model Model, messages []Message) []anthropicMessage {
 	var result []anthropicMessage
 	var pendingToolResults []anthropicContent
 
@@ -433,11 +466,11 @@ func convertMessagesToAnthropic(messages []Message) []anthropicMessage {
 			flushToolResults()
 			result = append(result, anthropicMessage{
 				Role:    "user",
-				Content: convertContentBlocksToAnthropic(m.Content),
+				Content: convertContentBlocksToAnthropic(model, m.Content),
 			})
 		case AssistantMessage:
 			flushToolResults()
-			content := convertContentBlocksToAnthropic(m.Content)
+			content := convertContentBlocksToAnthropic(model, m.Content)
 			// Only add assistant message if it has content
 			if len(content) > 0 {
 				result = append(result, anthropicMessage{
@@ -462,7 +495,7 @@ func convertMessagesToAnthropic(messages []Message) []anthropicMessage {
 	return result
 }
 
-func convertContentBlocksToAnthropic(blocks []ContentBlock) []anthropicContent {
+func convertContentBlocksToAnthropic(model Model, blocks []ContentBlock) []anthropicContent {
 	var result []anthropicContent
 
 	for _, block := range blocks {
@@ -473,11 +506,16 @@ func convertContentBlocksToAnthropic(blocks []ContentBlock) []anthropicContent {
 				Text: b.Text,
 			})
 		case ThinkingContent:
-			// Exclude thinking blocks from replayed messages.
-			// Thinking is internal reasoning that doesn't need to be sent back
-			// to the API. Including it without the original signature would
-			// cause validation errors.
+			// Display text is not replay state. The signed block follows as
+			// OpaqueContent, preserved through the proxy and agent store.
 			continue
+		case OpaqueContent:
+			if b.API == APIAnthropicMessages && b.Model == model.ID && b.Provider == model.Provider && b.BaseURL == model.BaseURL {
+				var item anthropicContent
+				if json.Unmarshal(b.Data, &item) == nil && ((item.Type == "thinking" && item.Thinking != nil && item.Signature != "") || (item.Type == "redacted_thinking" && item.Data != "")) {
+					result = append(result, item)
+				}
+			}
 		case ImageContent:
 			result = append(result, anthropicContent{
 				Type: "image",
@@ -571,10 +609,10 @@ func processAnthropicStream(ctx context.Context, body io.ReadCloser, model Model
 
 	// Track content blocks and their JSON accumulation for tool calls
 	var toolCallJSONs = make(map[int]string)
+	var thinkingBlocks = make(map[int]anthropicContent)
 
 	// The API's content indices count every block it streams, including
-	// types we don't accumulate (e.g. redacted_thinking). Map the server's
-	// index to our position in partial.Content so an unrecognized block
+	// types we don't recognize. Map the server's index to our position in partial.Content so an unrecognized block
 	// can't desync every block after it — before this map, a leading
 	// redacted_thinking block silently shifted the tool_use index and the
 	// tool call's arguments were dropped.
@@ -634,8 +672,17 @@ func processAnthropicStream(ctx context.Context, body io.ReadCloser, model Model
 					partial.Content = append(partial.Content, TextContent{Type: "text", Text: ""})
 					blockPositions[event.Index] = len(partial.Content) - 1
 				case "thinking":
-					partial.Content = append(partial.Content, ThinkingContent{Type: "thinking", Thinking: ""})
+					text := ""
+					if event.ContentBlock.Thinking != nil {
+						text = *event.ContentBlock.Thinking
+					}
+					block := *event.ContentBlock
+					block.Thinking = &text
+					thinkingBlocks[event.Index] = block
+					partial.Content = append(partial.Content, ThinkingContent{Type: "thinking", Thinking: text})
 					blockPositions[event.Index] = len(partial.Content) - 1
+				case "redacted_thinking":
+					thinkingBlocks[event.Index] = *event.ContentBlock
 				case "tool_use":
 					partial.Content = append(partial.Content, ToolCall{
 						Type: "toolCall",
@@ -649,6 +696,19 @@ func processAnthropicStream(ctx context.Context, body io.ReadCloser, model Model
 
 		case "content_block_delta":
 			if event.Delta != nil {
+				if block, ok := thinkingBlocks[event.Index]; ok {
+					switch event.Delta.Type {
+					case "thinking_delta":
+						text := event.Delta.Thinking
+						if block.Thinking != nil {
+							text = *block.Thinking + text
+						}
+						block.Thinking = &text
+					case "signature_delta":
+						block.Signature += event.Delta.Signature
+					}
+					thinkingBlocks[event.Index] = block
+				}
 				if idx, ok := blockPositions[event.Index]; ok {
 					switch event.Delta.Type {
 					case "text_delta":
@@ -671,6 +731,13 @@ func processAnthropicStream(ctx context.Context, body io.ReadCloser, model Model
 			}
 
 		case "content_block_stop":
+			if block, ok := thinkingBlocks[event.Index]; ok {
+				if block.Signature != "" || block.Data != "" {
+					data, _ := json.Marshal(block)
+					partial.Content = append(partial.Content, OpaqueContent{Type: "opaque", API: APIAnthropicMessages, Provider: model.Provider, Model: model.ID, BaseURL: model.BaseURL, Data: data})
+				}
+				delete(thinkingBlocks, event.Index)
+			}
 			if idx, ok := blockPositions[event.Index]; ok {
 				if tc, ok := partial.Content[idx].(ToolCall); ok {
 					// Parse accumulated JSON

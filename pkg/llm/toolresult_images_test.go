@@ -38,7 +38,7 @@ func textToolResult(callID, text string) ToolResultMessage {
 }
 
 func TestConvertMessagesToAnthropic_ToolResultImageBecomesBlockArray(t *testing.T) {
-	result := convertMessagesToAnthropic([]Message{imageToolResult("tool_1")})
+	result := convertMessagesToAnthropic(Model{}, []Message{imageToolResult("tool_1")})
 
 	if len(result) != 1 || result[0].Role != "user" {
 		t.Fatalf("expected one merged user message, got %+v", result)
@@ -64,7 +64,7 @@ func TestConvertMessagesToAnthropic_ToolResultImageBecomesBlockArray(t *testing.
 }
 
 func TestConvertMessagesToAnthropic_TextOnlyToolResultStaysString(t *testing.T) {
-	result := convertMessagesToAnthropic([]Message{textToolResult("tool_1", "plain output")})
+	result := convertMessagesToAnthropic(Model{}, []Message{textToolResult("tool_1", "plain output")})
 
 	tr := result[0].Content[0]
 	s, ok := tr.Content.(string)
@@ -86,7 +86,7 @@ func TestAnthropicToolResultContentWireShape(t *testing.T) {
 		{"image", imageToolResult("t1"), `"content":[`},
 	}
 	for _, tc := range cases {
-		result := convertMessagesToAnthropic([]Message{tc.msg})
+		result := convertMessagesToAnthropic(Model{}, []Message{tc.msg})
 		raw, err := json.Marshal(result[0].Content[0])
 		if err != nil {
 			t.Fatalf("%s: marshal: %v", tc.name, err)
@@ -97,7 +97,7 @@ func TestAnthropicToolResultContentWireShape(t *testing.T) {
 	}
 
 	empty := textToolResult("t1", "")
-	result := convertMessagesToAnthropic([]Message{empty})
+	result := convertMessagesToAnthropic(Model{}, []Message{empty})
 	raw, err := json.Marshal(result[0].Content[0])
 	if err != nil {
 		t.Fatalf("empty: marshal: %v", err)
@@ -112,7 +112,7 @@ func TestAnthropicToolResultContentWireShape(t *testing.T) {
 func TestConvertMessagesToAnthropic_ImageOnlyToolResultHasNoEmptyTextBlock(t *testing.T) {
 	msg := imageToolResult("tool_1")
 	msg.Content = msg.Content[1:] // drop the text block
-	result := convertMessagesToAnthropic([]Message{msg})
+	result := convertMessagesToAnthropic(Model{}, []Message{msg})
 
 	blocks, ok := result[0].Content[0].Content.([]anthropicContent)
 	if !ok {

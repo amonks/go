@@ -68,6 +68,8 @@ func (m Model) SupportsThinkingLevel(level ThinkingLevel) bool {
 		switch level {
 		case ThinkingOff:
 			return !modelAlwaysThinks(m.ID)
+		case ThinkingMax:
+			return modelIsClaude55(m.ID)
 		case ThinkingMinimal, ThinkingLow, ThinkingMedium, ThinkingHigh, ThinkingXHigh:
 			return modelUsesAdaptiveThinking(m.ID) || m.MaxTokens == 0 || thinkingBudget(level) < m.MaxTokens
 		default:

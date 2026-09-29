@@ -6,7 +6,7 @@ package llm
 func (m Model) SupportsToolChoice() bool {
 	switch m.API {
 	case APIAnthropicMessages:
-		return !modelAlwaysThinks(m.ID)
+		return !modelRejectsForcedTools(m.ID)
 	case APIOpenAIResponses:
 		return len(responsesEfforts(m.ID)) > 0
 	case APIOpenAICompletions:
