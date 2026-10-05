@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -249,8 +250,8 @@ func TestFailedLaunchCleanupFinishes(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		for i := len(cleanups) - 1; i >= 0; i-- {
-			cleanups[i]()
+		for _, cleanup := range slices.Backward(cleanups) {
+			cleanup()
 		}
 	}()
 	select {
