@@ -1,3 +1,3 @@
 module monks.co/pkg/jj
 
-go 1.26.6
+go 1.27.1
