@@ -32,6 +32,7 @@ type anthropicRequest struct {
 // adaptive thinking (Claude 4.6 and later).
 type anthropicOutputConfig struct {
 	Effort string `json:"effort,omitempty"`
+	Format any    `json:"format,omitempty"`
 }
 
 // anthropicToolChoice forces the model to call a specific tool. Type is
@@ -279,7 +280,7 @@ func convertToAnthropicRequest(model Model, req Request, opts StreamOptions) (an
 		})
 	}
 
-	// Force a specific tool when requested, for schema-constrained output.
+	// Force execution of a specific tool when requested.
 	// A forced tool and extended thinking are mutually exclusive at the
 	// API, which refuses the pair with a 400; refusing here names the
 	// reason. A caller forcing a tool says ThinkingOff — on the adaptive
@@ -297,6 +298,16 @@ func convertToAnthropicRequest(model Model, req Request, opts StreamOptions) (an
 		anthropicReq.ToolChoice = &anthropicToolChoice{Type: "tool", Name: req.ToolChoice}
 	}
 
+	if req.OutputSchema != nil {
+		schema, err := structuredRequestSchema(model, req.OutputSchema)
+		if err != nil {
+			return anthropicRequest{}, err
+		}
+		if anthropicReq.OutputConfig == nil {
+			anthropicReq.OutputConfig = &anthropicOutputConfig{}
+		}
+		anthropicReq.OutputConfig.Format = map[string]any{"type": "json_schema", "schema": schema}
+	}
 	applyAnthropicCaching(&anthropicReq, req.System, opts.CacheRetention)
 
 	return anthropicReq, nil
@@ -636,7 +647,7 @@ func processAnthropicStream(ctx context.Context, body io.ReadCloser, model Model
 			partial.StopReason = StopReasonError
 			partial.ErrorMessage = err.Error()
 			events <- ErrorEvent{Reason: StopReasonError, Message: partial}
-			errCh <- err
+			errCh <- newStreamFailure(model, partial, err)
 			return
 		}
 
@@ -756,6 +767,9 @@ func processAnthropicStream(ctx context.Context, body io.ReadCloser, model Model
 		case "message_delta":
 			if event.Delta != nil && event.Delta.StopReason != "" {
 				partial.StopReason = mapAnthropicStopReason(event.Delta.StopReason)
+				if partial.StopReason == StopReasonError {
+					partial.ErrorMessage = fmt.Sprintf("anthropic stop reason %q", event.Delta.StopReason)
+				}
 			}
 			if event.Usage != nil {
 				partial.Usage.Output = event.Usage.OutputTokens
@@ -771,26 +785,27 @@ func processAnthropicStream(ctx context.Context, body io.ReadCloser, model Model
 		}
 	}
 
-	// If we get here without a message_stop, send what we have
-	partial.Usage.Total = partial.Usage.Input + partial.Usage.Output
-	partial.Usage.Cost = calculateCost(partial.Usage, model.Cost)
-	if partial.StopReason == "" {
-		partial.StopReason = StopReasonEnd
-	}
-	events <- DoneEvent{Reason: partial.StopReason, Message: partial}
-	done <- partial
+	// A disconnected stream is not a completed answer, even if its final
+	// text delta happens to be valid JSON.
+	err := fmt.Errorf("anthropic stream ended before message_stop")
+	partial.StopReason = StopReasonError
+	partial.ErrorMessage = err.Error()
+	events <- ErrorEvent{Reason: StopReasonError, Message: partial}
+	errCh <- newStreamFailure(model, partial, err)
 }
 
 func mapAnthropicStopReason(reason string) StopReason {
 	switch reason {
-	case "end_turn":
+	case "end_turn", "stop_sequence":
 		return StopReasonEnd
 	case "tool_use":
 		return StopReasonToolUse
 	case "max_tokens":
 		return StopReasonMaxTokens
+	case "refusal":
+		return StopReasonRefusal
 	default:
-		return StopReasonEnd
+		return StopReasonError
 	}
 }
 

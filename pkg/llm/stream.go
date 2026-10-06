@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -86,7 +87,24 @@ type StreamHandle struct {
 	start time.Time
 }
 
+// streamFailure keeps the last provider state alongside a transport/protocol
+// error, independently of whether a caller consumed the public events already.
+// Wait returns both so gateways can account for tokens on interrupted streams.
+type streamFailure struct {
+	message AssistantMessage
+	err     error
+}
+
+func (e *streamFailure) Error() string { return e.err.Error() }
+func (e *streamFailure) Unwrap() error { return e.err }
+func newStreamFailure(model Model, msg AssistantMessage, err error) error {
+	msg.Usage.Cost = calculateCost(msg.Usage, model.Cost)
+	return &streamFailure{message: msg, err: err}
+}
+
 // Wait blocks until the stream completes and returns the final message.
+// On a provider stream failure it returns both the last partial message and
+// the error, retaining usage even when the stream did not finish.
 func (h *StreamHandle) Wait() (AssistantMessage, error) {
 	// Drain events first
 	for range h.Events {
@@ -104,6 +122,9 @@ func (h *StreamHandle) Wait() (AssistantMessage, error) {
 	case err := <-h.errCh:
 		if !h.start.IsZero() {
 			logInvocationError(h.model, h.api, err, time.Since(h.start))
+		}
+		if failure, ok := errors.AsType[*streamFailure](err); ok {
+			return failure.message, err
 		}
 		return AssistantMessage{}, err
 	}

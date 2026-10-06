@@ -27,6 +27,8 @@ type StopReason string
 const (
 	// StopReasonEnd indicates natural completion.
 	StopReasonEnd StopReason = "end"
+	// StopReasonRefusal indicates a provider refusal.
+	StopReasonRefusal StopReason = "refusal"
 	// StopReasonToolUse indicates the model wants to call tools.
 	StopReasonToolUse StopReason = "tool_use"
 	// StopReasonMaxTokens indicates the output limit was reached.
@@ -197,11 +199,12 @@ type Request struct {
 	Messages []Message // UserMessage, AssistantMessage, or ToolResultMessage
 	Tools    []Tool
 
-	// ToolChoice, when non-empty, forces the model to call the named tool
-	// instead of leaving the choice to the model. Use this to get
-	// schema-constrained structured output: define a single tool whose
-	// parameters describe the desired shape, then force it. Empty leaves
-	// tool use up to the model ("auto").
+	// OutputSchema requests a native JSON answer matching the schema. This
+	// is independent from tool execution and compatible with reasoning.
+	OutputSchema *Schema
+
+	// ToolChoice forces execution of the named tool. Empty leaves tool use
+	// up to the model. Use OutputSchema for structured answers.
 	ToolChoice string
 }
 

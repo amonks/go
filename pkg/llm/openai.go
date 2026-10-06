@@ -14,6 +14,7 @@ import (
 
 // OpenAI Chat Completions API types
 type openAICompletionsRequest struct {
+	ResponseFormat      any                  `json:"response_format,omitempty"`
 	Model               string               `json:"model"`
 	Messages            []openAIMessage      `json:"messages"`
 	MaxTokens           int                  `json:"max_tokens,omitempty"`
@@ -87,6 +88,7 @@ type openAIChoice struct {
 }
 
 type openAIDelta struct {
+	Refusal   string           `json:"refusal,omitempty"`
 	Role      string           `json:"role,omitempty"`
 	Content   string           `json:"content,omitempty"`
 	ToolCalls []openAIToolCall `json:"tool_calls,omitempty"`
@@ -204,7 +206,7 @@ func convertToOpenAIRequest(model Model, req Request, opts StreamOptions) (openA
 		})
 	}
 
-	// Force a specific tool when requested, for schema-constrained output.
+	// Force execution of a specific tool when requested.
 	if req.ToolChoice != "" {
 		openAIReq.ToolChoice = map[string]any{
 			"type":     "function",
@@ -212,6 +214,13 @@ func convertToOpenAIRequest(model Model, req Request, opts StreamOptions) (openA
 		}
 	}
 
+	if req.OutputSchema != nil {
+		schema, err := structuredRequestSchema(model, req.OutputSchema)
+		if err != nil {
+			return openAICompletionsRequest{}, err
+		}
+		openAIReq.ResponseFormat = map[string]any{"type": "json_schema", "json_schema": map[string]any{"name": "response", "strict": true, "schema": schema}}
+	}
 	return openAIReq, nil
 }
 
@@ -369,6 +378,8 @@ func processOpenAIStream(ctx context.Context, body io.ReadCloser, model Model, e
 	}
 	toolCalls := make(map[int]*toolCallBuilder)
 	hasStarted := false
+	refused := false
+	terminal := false
 	textContentIdx := -1
 
 	for {
@@ -389,7 +400,7 @@ func processOpenAIStream(ctx context.Context, body io.ReadCloser, model Model, e
 			partial.StopReason = StopReasonError
 			partial.ErrorMessage = err.Error()
 			events <- ErrorEvent{Reason: StopReasonError, Message: partial}
-			errCh <- err
+			errCh <- newStreamFailure(model, partial, err)
 			return
 		}
 
@@ -400,6 +411,7 @@ func processOpenAIStream(ctx context.Context, body io.ReadCloser, model Model, e
 
 		data := strings.TrimPrefix(line, "data: ")
 		if data == "[DONE]" {
+			terminal = true
 			break
 		}
 
@@ -426,6 +438,10 @@ func processOpenAIStream(ctx context.Context, body io.ReadCloser, model Model, e
 			}
 
 			if choice.Delta != nil {
+				if choice.Delta.Refusal != "" {
+					refused = true
+					choice.Delta.Content += choice.Delta.Refusal
+				}
 				// Handle text content
 				if choice.Delta.Content != "" {
 					if textContentIdx == -1 {
@@ -478,6 +494,9 @@ func processOpenAIStream(ctx context.Context, body io.ReadCloser, model Model, e
 			// Handle finish reason
 			if choice.FinishReason != "" {
 				partial.StopReason = mapOpenAIFinishReason(choice.FinishReason)
+				if partial.StopReason == StopReasonError {
+					partial.ErrorMessage = fmt.Sprintf("OpenAI finish reason %q", choice.FinishReason)
+				}
 
 				// Finalize tool calls - parse accumulated arguments JSON
 				for _, builder := range toolCalls {
@@ -500,8 +519,16 @@ func processOpenAIStream(ctx context.Context, body io.ReadCloser, model Model, e
 
 	// Calculate costs
 	partial.Usage.Cost = calculateCost(partial.Usage, model.Cost)
-	if partial.StopReason == "" {
-		partial.StopReason = StopReasonEnd
+	if !terminal || partial.StopReason == "" {
+		err := fmt.Errorf("OpenAI stream ended without a completed choice")
+		partial.StopReason = StopReasonError
+		partial.ErrorMessage = err.Error()
+		events <- ErrorEvent{Reason: StopReasonError, Message: partial}
+		errCh <- newStreamFailure(model, partial, err)
+		return
+	}
+	if refused {
+		partial.StopReason = StopReasonRefusal
 	}
 	events <- DoneEvent{Reason: partial.StopReason, Message: partial}
 	done <- partial
@@ -515,14 +542,17 @@ func mapOpenAIFinishReason(reason string) StopReason {
 		return StopReasonToolUse
 	case "length":
 		return StopReasonMaxTokens
+	case "content_filter":
+		return StopReasonRefusal
 	default:
-		return StopReasonEnd
+		return StopReasonError
 	}
 }
 
 // OpenAI Responses API types
 
 type responsesAPIRequest struct {
+	Text            any                 `json:"text,omitempty"`
 	Store           bool                `json:"store"`
 	Include         []string            `json:"include"`
 	Reasoning       *responsesReasoning `json:"reasoning,omitempty"`
@@ -730,7 +760,7 @@ func convertToResponsesRequest(model Model, req Request, opts StreamOptions) (re
 		})
 	}
 
-	// Force a specific tool when requested, for schema-constrained output.
+	// Force execution of a specific tool when requested.
 	if req.ToolChoice != "" {
 		if len(responsesEfforts(model.ID)) == 0 {
 			return responsesAPIRequest{}, fmt.Errorf("OpenAI model %s has no documented forced-tool capability", model.ID)
@@ -738,6 +768,13 @@ func convertToResponsesRequest(model Model, req Request, opts StreamOptions) (re
 		responsesReq.ToolChoice = map[string]any{"type": "function", "name": req.ToolChoice}
 	}
 
+	if req.OutputSchema != nil {
+		schema, err := structuredRequestSchema(model, req.OutputSchema)
+		if err != nil {
+			return responsesAPIRequest{}, err
+		}
+		responsesReq.Text = map[string]any{"format": map[string]any{"type": "json_schema", "name": "response", "strict": true, "schema": schema}}
+	}
 	return responsesReq, nil
 }
 
@@ -921,9 +958,13 @@ func processResponsesStream(ctx context.Context, body io.ReadCloser, model Model
 		partial.StopReason = StopReasonError
 		partial.ErrorMessage = err.Error()
 		events <- ErrorEvent{Reason: StopReasonError, Message: partial}
-		errCh <- err
+		errCh <- newStreamFailure(model, partial, err)
 	}
+	refused := false
 	finish := func() {
+		if refused {
+			partial.StopReason = StopReasonRefusal
+		}
 		partial.Usage.Cost = calculateCost(partial.Usage, model.Cost)
 		events <- DoneEvent{Reason: partial.StopReason, Message: partial}
 		done <- partial
@@ -969,7 +1010,7 @@ func processResponsesStream(ctx context.Context, body io.ReadCloser, model Model
 			partial.StopReason = StopReasonError
 			partial.ErrorMessage = err.Error()
 			events <- ErrorEvent{Reason: StopReasonError, Message: partial}
-			errCh <- err
+			errCh <- newStreamFailure(model, partial, err)
 			return
 		}
 
@@ -996,6 +1037,14 @@ func processResponsesStream(ctx context.Context, body io.ReadCloser, model Model
 			return
 		}
 
+		if event.Item != nil {
+			for _, part := range event.Item.Content {
+				if part.Type == "refusal" {
+					refused = true
+				}
+			}
+		}
+
 		switch event.Type {
 		case "response.created", "response.in_progress":
 			if !hasStarted {
@@ -1004,12 +1053,16 @@ func processResponsesStream(ctx context.Context, body io.ReadCloser, model Model
 			}
 
 		case "response.output_text.delta", "response.refusal.delta":
+			if event.Type == "response.refusal.delta" {
+				refused = true
+			}
 			i := ensureText(event.ItemID)
 			block := partial.Content[i].(TextContent)
 			block.Text += event.Delta
 			partial.Content[i] = block
 			events <- TextDeltaEvent{ContentIndex: i, Delta: event.Delta, Partial: partial}
 		case "response.refusal.done":
+			refused = true
 			i := ensureText(event.ItemID)
 			block := partial.Content[i].(TextContent)
 			previous := block.Text
@@ -1178,6 +1231,11 @@ func processResponsesStream(ctx context.Context, body io.ReadCloser, model Model
 					case "reasoning":
 						content = append(content, OpaqueContent{Type: "opaque", API: APIOpenAIResponses, Provider: model.Provider, Model: model.ID, BaseURL: model.BaseURL, Data: raw.Response.Output[i]})
 					case "message":
+						for _, p := range item.Content {
+							if p.Type == "refusal" {
+								refused = true
+							}
+						}
 						content = append(content, responsesMessageText(model, item))
 					case "function_call":
 						var args map[string]any

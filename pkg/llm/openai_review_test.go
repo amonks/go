@@ -19,7 +19,12 @@ func TestOpenAICachedUsageIsExclusive(t *testing.T) {
 			if api == APIOpenAIResponses {
 				processResponsesStream(context.Background(), io.NopCloser(strings.NewReader(`data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":1000,"output_tokens":100,"total_tokens":1100,"input_tokens_details":{"cached_tokens":800}}}}`+"\n")), model, events, done, errs)
 			} else {
-				processOpenAIStream(context.Background(), io.NopCloser(strings.NewReader(`data: {"usage":{"prompt_tokens":1000,"completion_tokens":100,"total_tokens":1100,"prompt_tokens_details":{"cached_tokens":800}}}`+"\ndata: [DONE]\n")), model, events, done, errs)
+				processOpenAIStream(context.Background(), io.NopCloser(strings.NewReader(`data: {"choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":1000,"completion_tokens":100,"total_tokens":1100,"prompt_tokens_details":{"cached_tokens":800}}}`+"\ndata: [DONE]\n")), model, events, done, errs)
+			}
+			select {
+			case err := <-errs:
+				t.Fatal(err)
+			default:
 			}
 			msg := <-done
 			if msg.Usage.Input != 200 || msg.Usage.CacheRead != 800 || msg.Usage.Total != 1100 || math.Abs(msg.Usage.Cost.Total-.00156) > 1e-10 {
@@ -40,6 +45,11 @@ func TestResponsesRefusalIsVisible(t *testing.T) {
 			done := make(chan AssistantMessage, 1)
 			errs := make(chan error, 1)
 			processResponsesStream(context.Background(), io.NopCloser(strings.NewReader(tc.stream)), Model{}, events, done, errs)
+			select {
+			case err := <-errs:
+				t.Fatal(err)
+			default:
+			}
 			msg := <-done
 			if len(msg.Content) != 1 {
 				t.Fatalf("content=%v", msg.Content)
