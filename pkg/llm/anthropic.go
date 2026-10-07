@@ -217,13 +217,16 @@ func convertToAnthropicRequest(model Model, req Request, opts StreamOptions) (an
 
 	// Set temperature
 	if opts.Temperature != nil {
+		if modelIsHaiku55(model.ID) && *opts.Temperature != 1 {
+			return anthropicRequest{}, fmt.Errorf("llm: %s only accepts the default temperature (1)", model.ID)
+		}
 		anthropicReq.Temperature = opts.Temperature
 	}
 
 	// Set thinking if enabled. Claude 4.6-era and later models reject the
 	// old {type: "enabled", budget_tokens: N} shape with a 400 — they take
 	// {type: "adaptive"} with an output_config effort level instead, and
-	// also reject explicit sampling parameters like temperature.
+	// also restrict sampling parameters like temperature.
 	switch {
 	case opts.ThinkingLevel == ThinkingOff:
 		// On the adaptive families thinking is on unless the request says
@@ -287,12 +290,13 @@ func convertToAnthropicRequest(model Model, req Request, opts StreamOptions) (an
 	// families thinking is on unless the request disables it, so an
 	// unset level is thinking too — and a model that thinks
 	// unconditionally cannot take a forced tool at all. Sonnet 5.5 also
-	// rejects forced tools, even with between_tools.
+	// rejects forced tools, even with between_tools. Haiku 5.5 permits
+	// the pair, suppressing its thinking in the forced-tool response.
 	if req.ToolChoice != "" {
 		switch {
 		case modelRejectsForcedTools(model.ID):
 			return anthropicRequest{}, fmt.Errorf("llm: %s cannot take a forced tool (%s)", model.ID, req.ToolChoice)
-		case opts.ThinkingLevel != ThinkingOff && (opts.ThinkingLevel != "" || modelUsesAdaptiveThinking(model.ID)):
+		case !modelIsHaiku55(model.ID) && opts.ThinkingLevel != ThinkingOff && (opts.ThinkingLevel != "" || modelUsesAdaptiveThinking(model.ID)):
 			return anthropicRequest{}, fmt.Errorf("llm: a forced tool (%s) needs ThinkingOff: the API refuses tool_choice beside extended thinking", req.ToolChoice)
 		}
 		anthropicReq.ToolChoice = &anthropicToolChoice{Type: "tool", Name: req.ToolChoice}
@@ -367,13 +371,15 @@ func shouldEnableAnthropicCaching(retention CacheRetention) bool {
 
 // adaptiveThinkingModelPrefixes lists the Anthropic model families that use
 // adaptive thinking. On the 4.6 family the old enabled/budget_tokens shape is
-// deprecated; on everything newer (4.7+, Sonnet 5, Opus 5, Fable/Mythos 5) it
-// is rejected with a 400, as are explicit sampling parameters.
+// deprecated; on everything newer (4.7+, Sonnet 5, Opus 5, Haiku 5.5,
+// Fable/Mythos 5) it is rejected with a 400. These models also restrict
+// sampling parameters.
 var adaptiveThinkingModelPrefixes = []string{
 	"claude-fable-5",
 	"claude-mythos-5",
 	"claude-opus-5",
 	"claude-sonnet-5",
+	"claude-haiku-5-5",
 	"claude-opus-4-6",
 	"claude-opus-4-7",
 	"claude-opus-4-8",
@@ -410,8 +416,13 @@ func modelAlwaysThinks(modelID string) bool {
 // Claude 5.5 request differences are documented in each model's migration guide:
 // https://platform.claude.com/docs/en/models/opus-5-5/migration-guide
 // https://platform.claude.com/docs/en/models/sonnet-5-5/migration-guide
+// https://platform.claude.com/docs/en/models/haiku-5-5/migration-guide
 func modelIsClaude55(id string) bool {
-	return strings.HasPrefix(id, "claude-opus-5-5") || modelUsesBetweenTools(id)
+	return strings.HasPrefix(id, "claude-opus-5-5") || modelUsesBetweenTools(id) || modelIsHaiku55(id)
+}
+
+func modelIsHaiku55(id string) bool {
+	return strings.HasPrefix(id, "claude-haiku-5-5")
 }
 
 func modelUsesBetweenTools(id string) bool {

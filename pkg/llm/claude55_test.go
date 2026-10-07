@@ -49,7 +49,16 @@ func TestClaude55Requests(t *testing.T) {
 }
 
 func TestClaude55ThinkingReplay(t *testing.T) {
-	model := Model{ID: "claude-opus-5-5", API: APIAnthropicMessages, Provider: "anthropic", MaxTokens: 128000}
+	for _, id := range []string{"claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"} {
+		t.Run(id, func(t *testing.T) {
+			testClaude55ThinkingReplay(t, id)
+		})
+	}
+}
+
+func testClaude55ThinkingReplay(t *testing.T, id string) {
+	t.Helper()
+	model := Model{ID: id, API: APIAnthropicMessages, Provider: "anthropic", MaxTokens: 128000}
 	stream := strings.Join([]string{
 		`data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}`,
 		`data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"signed-state"}}`,
@@ -69,8 +78,17 @@ func TestClaude55ThinkingReplay(t *testing.T) {
 	otherProvider, otherEndpoint := model, model
 	otherProvider.Provider = "other"
 	otherEndpoint.BaseURL = "https://other.example"
-	for _, target := range []Model{model, otherProvider, otherEndpoint, {ID: "claude-sonnet-5-5", API: model.API, Provider: model.Provider, MaxTokens: model.MaxTokens}} {
-		req, err := convertToAnthropicRequest(target, Request{Messages: []Message{msg}}, StreamOptions{})
+	otherModel := model
+	otherModel.ID = "claude-opus-5-5"
+	if otherModel.ID == model.ID {
+		otherModel.ID = "claude-sonnet-5-5"
+	}
+	messages := []Message{msg, ToolResultMessage{
+		ToolCallID: "call1",
+		Content:    []ContentBlock{TextContent{Text: "/tmp"}},
+	}}
+	for _, target := range []Model{model, otherProvider, otherEndpoint, otherModel} {
+		req, err := convertToAnthropicRequest(target, Request{Messages: messages}, StreamOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
