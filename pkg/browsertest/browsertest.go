@@ -71,6 +71,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -152,12 +153,34 @@ func WithScrollbars() Option {
 	return func(o *options) { o.scrollbars = true }
 }
 
-// WithSoftwareWebGL gives the page WebGL, drawn on the CPU by
-// SwiftShader. The launch disables the GPU — a CI builder has none —
-// and Chrome no longer falls back to software WebGL unasked, so without
-// this a page's getContext("webgl2") returns null.
+// WithSoftwareWebGL gives the page WebGL 2 drawn on the CPU. The launch
+// disables the GPU — a CI builder has none — and Chrome no longer falls
+// back to software WebGL unasked, so without this a page's
+// getContext("webgl2") returns null.
+//
+// Which software renderer depends on the build: Google's Chrome carries
+// its own (SwiftShader), but Linux distributions' Chromium need not —
+// Alpine's, the CI builder's, has none — so on Linux the page draws
+// through ANGLE's GL ES backend on Mesa's llvmpipe instead, which needs
+// Mesa's gallium drivers and EGL installed (the builder image has them).
 func WithSoftwareWebGL() Option {
 	return func(o *options) { o.webgl = true }
+}
+
+// softwareWebGLFlags are the launch flags WithSoftwareWebGL adds.
+func softwareWebGLFlags(goos string) []chromedp.ExecAllocatorOption {
+	if goos == "linux" {
+		return []chromedp.ExecAllocatorOption{
+			chromedp.Flag("disable-gpu", false),
+			chromedp.Flag("use-gl", "angle"),
+			chromedp.Flag("use-angle", "gl-egl"),
+			chromedp.Flag("ignore-gpu-blocklist", true),
+		}
+	}
+	return []chromedp.ExecAllocatorOption{
+		chromedp.Flag("use-angle", "swiftshader"),
+		chromedp.Flag("enable-unsafe-swiftshader", true),
+	}
 }
 
 // Step caps one action at StepTimeout and names it in any error, so a
@@ -301,7 +324,7 @@ func newBrowser(t *testing.T, cleanup func(func()), opts ...Option) (context.Con
 		chromedp.WSURLReadTimeout(launchTimeout),
 	)
 	if cfg.webgl {
-		flags = append(flags, chromedp.Flag("use-angle", "swiftshader"), chromedp.Flag("enable-unsafe-swiftshader", true))
+		flags = append(flags, softwareWebGLFlags(goruntime.GOOS)...)
 	}
 	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), flags...)
 	cleanup(cancelAlloc)
