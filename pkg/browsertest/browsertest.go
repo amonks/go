@@ -124,6 +124,7 @@ type Option func(*options)
 type options struct {
 	budget     time.Duration
 	scrollbars bool
+	webgl      bool
 	// execPath overrides the browser RequireChrome would resolve. Only
 	// the tests here set it, to exercise a launch that fails.
 	execPath string
@@ -149,6 +150,14 @@ func WithBudget(d time.Duration) Option {
 // chromedp hides them by default.
 func WithScrollbars() Option {
 	return func(o *options) { o.scrollbars = true }
+}
+
+// WithSoftwareWebGL gives the page WebGL, drawn on the CPU by
+// SwiftShader. The launch disables the GPU — a CI builder has none —
+// and Chrome no longer falls back to software WebGL unasked, so without
+// this a page's getContext("webgl2") returns null.
+func WithSoftwareWebGL() Option {
+	return func(o *options) { o.webgl = true }
 }
 
 // Step caps one action at StepTimeout and names it in any error, so a
@@ -282,16 +291,19 @@ func newBrowser(t *testing.T, cleanup func(func()), opts ...Option) (context.Con
 		t.Logf("pre-read %.1fMB under %s into the page cache in %s", float64(read)/(1<<20), dir, time.Since(start).Round(time.Millisecond))
 	})
 	userDataDir := t.TempDir()
-	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(),
-		append(chromedp.DefaultExecAllocatorOptions[:],
-			chromedp.ExecPath(chrome),
-			chromedp.UserDataDir(userDataDir),
-			chromedp.Flag("headless", "new"),
-			chromedp.Flag("hide-scrollbars", !cfg.scrollbars),
-			chromedp.Flag("disable-gpu", true),
-			chromedp.Flag("no-sandbox", true),
-			chromedp.WSURLReadTimeout(launchTimeout),
-		)...)
+	flags := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.ExecPath(chrome),
+		chromedp.UserDataDir(userDataDir),
+		chromedp.Flag("headless", "new"),
+		chromedp.Flag("hide-scrollbars", !cfg.scrollbars),
+		chromedp.Flag("disable-gpu", true),
+		chromedp.Flag("no-sandbox", true),
+		chromedp.WSURLReadTimeout(launchTimeout),
+	)
+	if cfg.webgl {
+		flags = append(flags, chromedp.Flag("use-angle", "swiftshader"), chromedp.Flag("enable-unsafe-swiftshader", true))
+	}
+	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), flags...)
 	cleanup(cancelAlloc)
 	ctx, cancelBrowser := chromedp.NewContext(allocCtx,
 		chromedp.WithBrowserOption(chromedp.WithDialTimeout(dialTimeout)))

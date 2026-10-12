@@ -353,3 +353,20 @@ func TestPollShowsThePageAStallLeft(t *testing.T) {
 		}
 	}
 }
+
+// A suite that asks for SwiftShader gets WebGL 2 though the launch
+// disables the GPU.
+func TestWithSoftwareWebGL(t *testing.T) {
+	probe := `(() => { const c = document.createElement("canvas"); return !!c.getContext("webgl2"); })()`
+	ctx := NewBrowser(t, WithSoftwareWebGL())
+	var got bool
+	if err := chromedp.Run(ctx,
+		Step("open a blank page", chromedp.Navigate("about:blank")),
+		Step("probe WebGL 2", chromedp.Evaluate(probe, &got)),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if !got {
+		t.Error("no WebGL 2")
+	}
+}
