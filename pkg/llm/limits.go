@@ -38,11 +38,14 @@ type Limits struct {
 
 // ModelLimits asks the provider for the model's published limits, so
 // that Model.ContextWindow and Model.MaxTokens can carry the provider's
-// figures rather than ones kept by hand. Only the Anthropic Models API
-// (GET /v1/models/{id}) answers today; the OpenAI-style APIs publish no
+// figures rather than ones kept by hand. Anthropic and Google expose these
+// in their Models APIs; the OpenAI-style APIs publish no
 // per-model output ceiling, and their max_tokens is optional anyway, so
 // for them this reports ErrNoLimits and the request omits the field.
 func ModelLimits(ctx context.Context, model Model) (Limits, error) {
+	if model.API == APIGoogleGenerateContent {
+		return googleModelLimits(ctx, model)
+	}
 	if model.API != APIAnthropicMessages {
 		return Limits{}, ErrNoLimits
 	}

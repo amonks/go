@@ -17,6 +17,8 @@ func (m Model) SupportsToolChoice() bool {
 		return len(responsesEfforts(m.ID)) > 0
 	case APIOpenAICompletions:
 		return true
+	case APIGoogleGenerateContent:
+		return googleModelKnown(m.ID)
 	default:
 		return false
 	}
@@ -29,6 +31,8 @@ var anthropicSnapshotSuffix = regexp.MustCompile(`-\d{8}$`)
 // Sources: the providers' structured-output guides linked in specs/pkg-llm.md.
 func (m Model) SupportsStructuredOutput() bool {
 	switch m.API {
+	case APIGoogleGenerateContent:
+		return googleModelKnown(m.ID)
 	case APIAnthropicMessages:
 		id := anthropicSnapshotSuffix.ReplaceAllString(m.ID, "")
 		switch id {
@@ -75,5 +79,5 @@ func structuredRequestSchema(model Model, schema *Schema) (map[string]any, error
 	if !model.SupportsStructuredOutput() {
 		return nil, fmt.Errorf("llm: model %s has no documented native structured-output capability", model.ID)
 	}
-	return outputSchema(schema, model.API != APIAnthropicMessages)
+	return outputSchema(schema, model.API == APIOpenAICompletions || model.API == APIOpenAIResponses)
 }

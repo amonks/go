@@ -172,6 +172,8 @@ func Stream(ctx context.Context, model Model, req Request, opts StreamOptions) (
 		handle, err = streamOpenAICompletions(ctx, model, req, opts)
 	case APIOpenAIResponses:
 		handle, err = streamOpenAIResponses(ctx, model, req, opts)
+	case APIGoogleGenerateContent:
+		handle, err = streamGoogle(ctx, model, req, opts)
 	default:
 		// A permanent configuration error: retrying will pick the same branch.
 		err = &retryableError{err: fmt.Errorf("unsupported API: %s", model.API)}

@@ -1,7 +1,8 @@
 // Package llm provides the core LLM abstraction for streaming completions.
 //
 // This package implements unified message types, streaming via channels,
-// tool schema generation, and provider implementations for Anthropic and OpenAI.
+// tool schema generation, and provider implementations for Anthropic, OpenAI,
+// and Google Gemini.
 package llm
 
 import (
@@ -19,6 +20,8 @@ const (
 	APIOpenAICompletions API = "openai-completions"
 	// APIOpenAIResponses is the OpenAI Responses API.
 	APIOpenAIResponses API = "openai-responses"
+	// APIGoogleGenerateContent is the Gemini Developer API.
+	APIGoogleGenerateContent API = "google-generate-content"
 )
 
 // StopReason indicates why generation stopped.

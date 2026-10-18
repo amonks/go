@@ -61,6 +61,9 @@ func (m Model) SupportsThinkingLevel(level ThinkingLevel) bool {
 		return true
 	}
 	switch m.API {
+	case APIGoogleGenerateContent:
+		_, err := googleThinking(m.ID, level)
+		return err == nil
 	case APIOpenAIResponses:
 		_, err := responsesReasoningEffort(m.ID, level)
 		return err == nil
