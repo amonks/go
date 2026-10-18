@@ -1,8 +1,7 @@
 // Package browsertest drives headless Chrome for the repository's
 // browser tests: locating a browser, launching it with budgets a busy
 // CI builder can meet, putting the page's own console in the test log,
-// and shutting it down in an order that doesn't race the temp-dir
-// cleanup.
+// and shutting it down before retrying transient profile cleanup failures.
 //
 // A suite's whole use of it is usually two calls:
 //
@@ -277,9 +276,10 @@ var warmChromeOnce sync.Once
 // why the user data dir is allocated before any cleanup is registered:
 // t.Cleanup runs LIFO, so the graceful chromedp.Cancel fires while the
 // allocator (and thus Chrome) is still alive, then the allocator cancel
-// kills any survivors, and only then does t.TempDir's RemoveAll touch
-// the dir. Chrome is fully gone before its files are removed, which is
-// what keeps "directory not empty" out of the suite.
+// waits for the browser process. Profile cleanup then retries transient
+// ENOTEMPTY from Chromium's final writes before t.TempDir removes its parent.
+// Other filesystem failures and writes that outlast the retry budget fail
+// the test; ordinary cleanup pays no delay.
 func NewBrowser(t *testing.T, opts ...Option) context.Context {
 	t.Helper()
 	ctx, err := newBrowser(t, t.Cleanup, opts...)
@@ -314,6 +314,13 @@ func newBrowser(t *testing.T, cleanup func(func()), opts ...Option) (context.Con
 		t.Logf("pre-read %.1fMB under %s into the page cache in %s", float64(read)/(1<<20), dir, time.Since(start).Round(time.Millisecond))
 	})
 	userDataDir := t.TempDir()
+	cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), profileCleanupTimeout)
+		defer cancel()
+		if err := removeProfile(ctx, userDataDir, os.RemoveAll); err != nil {
+			t.Errorf("Chrome profile cleanup: %v", err)
+		}
+	})
 	flags := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.ExecPath(chrome),
 		chromedp.UserDataDir(userDataDir),
