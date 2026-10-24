@@ -292,9 +292,13 @@
       });
     }
 
+    // A refresh that arrives before the queued hydration — a host
+    // rewriting cells right after swapping the grid in — hydrates from
+    // the URL itself; refreshing from defaults would write them over
+    // the state the hydration was about to read.
     refresh() {
       const view = this._captureRefreshView();
-      this._refresh({ readQuery: false, writeQuery: this._connected });
+      this._refresh({ readQuery: !this._initialized && this._connected, writeQuery: this._connected });
       this._restoreRefreshView(view);
     }
 

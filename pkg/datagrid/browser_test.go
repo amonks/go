@@ -1277,6 +1277,44 @@ func TestBrowserRefreshPreservesGeneratedFilterInteraction(t *testing.T) {
 	}
 }
 
+// A host that swaps in freshly served markup and rewrites cells before
+// the new grid's queued hydration has read the URL — cc's live refresh
+// under a chart that re-ranks its leaderboard — must not reset the
+// grid: a refresh that comes first hydrates from the URL itself.
+func TestBrowserRefreshBeforeHydrationKeepsURLState(t *testing.T) {
+	server := browserServer(t)
+	defer server.Close()
+	ctx := browsertest.NewBrowser(t)
+	navigateReady(t, ctx, server.URL+"/?keep=yes&dg.people.search=ada")
+	var got struct {
+		Before  bool     `json:"before"`
+		Search  string   `json:"search"`
+		Visible []string `json:"visible"`
+	}
+	if err := chromedp.Run(ctx,
+		chromedp.Evaluate(`void fetch(location.href).then(response => response.text()).then(html => {
+			const fresh = document.adoptNode(new DOMParser().parseFromString(html, 'text/html').querySelector('#people'));
+			document.querySelector('#people').replaceWith(fresh);
+			window.refreshedBeforeHydration = !fresh.hasAttribute('data-dg-ready');
+			fresh.refresh();
+		})`, nil),
+		chromedp.Poll(`window.refreshedBeforeHydration !== undefined && !!document.querySelector('#people[data-dg-ready]')`, nil,
+			browsertest.PollTimeout),
+		chromedp.Evaluate(`({
+			before: window.refreshedBeforeHydration,
+			search: document.querySelector('#people').getState().search,
+			visible: [...document.querySelectorAll('#people tr[data-dg-row]:not([hidden])')].map(row => row.dataset.dgRowId),
+		})`, &got),
+	); err != nil {
+		t.Fatal(err)
+	}
+	url := historyURL(t, ctx)
+	if !got.Before || got.Search != "ada" || !slices.Equal(got.Visible, []string{"person-00"}) ||
+		!strings.Contains(url, "dg.people.search=ada") || !strings.Contains(url, "keep=yes") {
+		t.Fatalf("refresh before hydration = %#v, url %s", got, url)
+	}
+}
+
 // TestBrowserUselessFacetsAreSuppressed covers the facet-worthiness
 // rules: a grid of five or fewer rows renders no auto facets at all, an
 // auto column whose every value is unique renders none either, an
@@ -1938,7 +1976,7 @@ func TestBrowserHostChromeCascade(t *testing.T) {
 		ID:      "cascade",
 		Caption: "Cascade calibration",
 		Columns: []Column[entry]{owner, name, path, machine, mixed, detail, count, delta, timing},
-		RowID: func(e entry) string { return e.Name },
+		RowID:   func(e entry) string { return e.Name },
 	}
 
 	var out strings.Builder
