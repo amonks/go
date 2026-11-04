@@ -22,17 +22,17 @@ type anthropicRequest struct {
 	System       []anthropicContent     `json:"system,omitempty"`
 	Stream       bool                   `json:"stream"`
 	Tools        []anthropicTool        `json:"tools,omitempty"`
-	ToolChoice   *anthropicToolChoice   `json:"tool_choice,omitempty"`
-	Temperature  *float64               `json:"temperature,omitempty"`
-	Thinking     *anthropicThinking     `json:"thinking,omitempty"`
-	OutputConfig *anthropicOutputConfig `json:"output_config,omitempty"`
+	ToolChoice   *anthropicToolChoice   `json:"tool_choice,omitzero"`
+	Temperature  *float64               `json:"temperature,omitzero"`
+	Thinking     *anthropicThinking     `json:"thinking,omitzero"`
+	OutputConfig *anthropicOutputConfig `json:"output_config,omitzero"`
 }
 
 // anthropicOutputConfig carries the effort level for models that use
 // adaptive thinking (Claude 4.6 and later).
 type anthropicOutputConfig struct {
 	Effort string `json:"effort,omitempty"`
-	Format any    `json:"format,omitempty"`
+	Format any    `json:"format,omitzero"`
 }
 
 // anthropicToolChoice forces the model to call a specific tool. Type is
@@ -45,7 +45,7 @@ type anthropicToolChoice struct {
 type anthropicThinking struct {
 	Type         string `json:"type"`
 	Display      string `json:"display,omitempty"`
-	BudgetTokens int    `json:"budget_tokens,omitempty"`
+	BudgetTokens int    `json:"budget_tokens,omitzero"`
 }
 
 type anthropicMessage struct {
@@ -56,10 +56,10 @@ type anthropicMessage struct {
 type anthropicContent struct {
 	Type      string           `json:"type"`
 	Text      string           `json:"text,omitempty"`
-	Thinking  *string          `json:"thinking,omitempty"`
+	Thinking  *string          `json:"thinking,omitzero"`
 	Signature string           `json:"signature,omitempty"`
 	Data      string           `json:"data,omitempty"`
-	Source    *anthropicSource `json:"source,omitempty"`
+	Source    *anthropicSource `json:"source,omitzero"`
 	ID        string           `json:"id,omitempty"`
 	Name      string           `json:"name,omitempty"`
 	Input     map[string]any   `json:"input,omitempty"`
@@ -68,9 +68,9 @@ type anthropicContent struct {
 	// array of text/image blocks, so this holds a string or
 	// []anthropicContent (nil omits the key, the shape an empty result has
 	// always been sent as).
-	Content      any                    `json:"content,omitempty"`
-	IsError      bool                   `json:"is_error,omitempty"`
-	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
+	Content      any                    `json:"content,omitzero"`
+	IsError      bool                   `json:"is_error,omitzero"`
+	CacheControl *anthropicCacheControl `json:"cache_control,omitzero"`
 }
 
 type anthropicCacheControl struct {
@@ -87,17 +87,17 @@ type anthropicTool struct {
 	Name         string                 `json:"name"`
 	Description  string                 `json:"description,omitempty"`
 	InputSchema  *Schema                `json:"input_schema"`
-	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
+	CacheControl *anthropicCacheControl `json:"cache_control,omitzero"`
 }
 
 // Anthropic SSE event types
 type anthropicEvent struct {
 	Type         string            `json:"type"`
-	Message      *anthropicAPIMsg  `json:"message,omitempty"`
-	Index        int               `json:"index,omitempty"`
-	ContentBlock *anthropicContent `json:"content_block,omitempty"`
-	Delta        *anthropicDelta   `json:"delta,omitempty"`
-	Usage        *anthropicUsage   `json:"usage,omitempty"`
+	Message      *anthropicAPIMsg  `json:"message,omitzero"`
+	Index        int               `json:"index,omitzero"`
+	ContentBlock *anthropicContent `json:"content_block,omitzero"`
+	Delta        *anthropicDelta   `json:"delta,omitzero"`
+	Usage        *anthropicUsage   `json:"usage,omitzero"`
 }
 
 type anthropicAPIMsg struct {
@@ -123,8 +123,8 @@ type anthropicDelta struct {
 type anthropicUsage struct {
 	InputTokens              int `json:"input_tokens"`
 	OutputTokens             int `json:"output_tokens"`
-	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
-	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitzero"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitzero"`
 }
 
 func streamAnthropic(ctx context.Context, model Model, req Request, opts StreamOptions) (*StreamHandle, error) {

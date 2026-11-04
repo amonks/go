@@ -14,16 +14,16 @@ import (
 
 // OpenAI Chat Completions API types
 type openAICompletionsRequest struct {
-	ResponseFormat      any                  `json:"response_format,omitempty"`
+	ResponseFormat      any                  `json:"response_format,omitzero"`
 	Model               string               `json:"model"`
 	Messages            []openAIMessage      `json:"messages"`
-	MaxTokens           int                  `json:"max_tokens,omitempty"`
-	MaxCompletionTokens int                  `json:"max_completion_tokens,omitempty"` // For o1/o3/o4 reasoning models
-	Temperature         *float64             `json:"temperature,omitempty"`
+	MaxTokens           int                  `json:"max_tokens,omitzero"`
+	MaxCompletionTokens int                  `json:"max_completion_tokens,omitzero"` // For o1/o3/o4 reasoning models
+	Temperature         *float64             `json:"temperature,omitzero"`
 	Stream              bool                 `json:"stream"`
 	Tools               []openAITool         `json:"tools,omitempty"`
-	ToolChoice          any                  `json:"tool_choice,omitempty"`
-	StreamOptions       *openAIStreamOptions `json:"stream_options,omitempty"`
+	ToolChoice          any                  `json:"tool_choice,omitzero"`
+	StreamOptions       *openAIStreamOptions `json:"stream_options,omitzero"`
 }
 
 type openAIStreamOptions struct {
@@ -40,7 +40,7 @@ type openAIMessage struct {
 type openAIContentPart struct {
 	Type     string          `json:"type"`
 	Text     string          `json:"text,omitempty"`
-	ImageURL *openAIImageURL `json:"image_url,omitempty"`
+	ImageURL *openAIImageURL `json:"image_url,omitzero"`
 }
 
 type openAIImageURL struct {
@@ -78,12 +78,12 @@ type openAIStreamChunk struct {
 	Created int64          `json:"created"`
 	Model   string         `json:"model"`
 	Choices []openAIChoice `json:"choices"`
-	Usage   *openAIUsage   `json:"usage,omitempty"`
+	Usage   *openAIUsage   `json:"usage,omitzero"`
 }
 
 type openAIChoice struct {
 	Index        int          `json:"index"`
-	Delta        *openAIDelta `json:"delta,omitempty"`
+	Delta        *openAIDelta `json:"delta,omitzero"`
 	FinishReason string       `json:"finish_reason,omitempty"`
 }
 
@@ -102,7 +102,7 @@ type openAIUsage struct {
 	PromptTokens        int                        `json:"prompt_tokens"`
 	CompletionTokens    int                        `json:"completion_tokens"`
 	TotalTokens         int                        `json:"total_tokens"`
-	PromptTokensDetails *openAIPromptTokensDetails `json:"prompt_tokens_details,omitempty"`
+	PromptTokensDetails *openAIPromptTokensDetails `json:"prompt_tokens_details,omitzero"`
 }
 
 func streamOpenAICompletions(ctx context.Context, model Model, req Request, opts StreamOptions) (*StreamHandle, error) {
@@ -552,18 +552,18 @@ func mapOpenAIFinishReason(reason string) StopReason {
 // OpenAI Responses API types
 
 type responsesAPIRequest struct {
-	Text            any                 `json:"text,omitempty"`
+	Text            any                 `json:"text,omitzero"`
 	Store           bool                `json:"store"`
 	Include         []string            `json:"include"`
-	Reasoning       *responsesReasoning `json:"reasoning,omitempty"`
+	Reasoning       *responsesReasoning `json:"reasoning,omitzero"`
 	Model           string              `json:"model"`
 	Input           any                 `json:"input"` // string or []map[string]any
 	Instructions    string              `json:"instructions,omitempty"`
-	MaxOutputTokens int                 `json:"max_output_tokens,omitempty"`
-	Temperature     *float64            `json:"temperature,omitempty"`
+	MaxOutputTokens int                 `json:"max_output_tokens,omitzero"`
+	Temperature     *float64            `json:"temperature,omitzero"`
 	Stream          bool                `json:"stream"`
 	Tools           []responsesAPITool  `json:"tools,omitempty"`
-	ToolChoice      any                 `json:"tool_choice,omitempty"`
+	ToolChoice      any                 `json:"tool_choice,omitzero"`
 }
 
 type responsesReasoning struct {
@@ -580,7 +580,7 @@ type responsesAPITool struct {
 	Type        string  `json:"type"` // "function"
 	Name        string  `json:"name,omitempty"`
 	Description string  `json:"description,omitempty"`
-	Parameters  *Schema `json:"parameters,omitempty"`
+	Parameters  *Schema `json:"parameters,omitzero"`
 }
 
 // Responses API stream event types
@@ -592,28 +592,28 @@ type responsesStreamEvent struct {
 
 	// Common routing fields present on many streaming events
 	ResponseID  string `json:"response_id,omitempty"`
-	OutputIndex int    `json:"output_index,omitempty"`
+	OutputIndex int    `json:"output_index,omitzero"`
 	ItemID      string `json:"item_id,omitempty"`
 
 	// Payload fields (vary by event type)
-	Response  *responsesObj  `json:"response,omitempty"`
-	Item      *responsesItem `json:"item,omitempty"`
-	Part      *responsesPart `json:"part,omitempty"`
+	Response  *responsesObj  `json:"response,omitzero"`
+	Item      *responsesItem `json:"item,omitzero"`
+	Part      *responsesPart `json:"part,omitzero"`
 	Delta     string         `json:"delta,omitempty"`
 	Text      string         `json:"text,omitempty"`
 	Arguments string         `json:"arguments,omitempty"`
 }
 
 type responsesObj struct {
-	Error             *responsesError `json:"error,omitempty"`
+	Error             *responsesError `json:"error,omitzero"`
 	IncompleteDetails *struct {
 		Reason string `json:"reason"`
-	} `json:"incomplete_details,omitempty"`
+	} `json:"incomplete_details,omitzero"`
 	ID     string          `json:"id"`
 	Status string          `json:"status"`
 	Model  string          `json:"model"`
 	Output []responsesItem `json:"output"`
-	Usage  *responsesUsage `json:"usage,omitempty"`
+	Usage  *responsesUsage `json:"usage,omitzero"`
 }
 
 type responsesError struct {
@@ -650,7 +650,7 @@ type responsesUsage struct {
 	InputTokens        int                          `json:"input_tokens"`
 	OutputTokens       int                          `json:"output_tokens"`
 	TotalTokens        int                          `json:"total_tokens"`
-	InputTokensDetails *responsesInputTokensDetails `json:"input_tokens_details,omitempty"`
+	InputTokensDetails *responsesInputTokensDetails `json:"input_tokens_details,omitzero"`
 }
 
 // streamOpenAIResponses implements the OpenAI Responses API streaming.

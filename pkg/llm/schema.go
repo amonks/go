@@ -11,9 +11,9 @@ type Schema struct {
 	Description string             `json:"description,omitempty"`
 	Properties  map[string]*Schema `json:"properties,omitempty"`
 	Required    []string           `json:"required,omitempty"`
-	Items       *Schema            `json:"items,omitempty"`
+	Items       *Schema            `json:"items,omitzero"`
 	Enum        []string           `json:"enum,omitempty"`
-	Default     any                `json:"default,omitempty"`
+	Default     any                `json:"default,omitzero"`
 }
 
 // GenerateSchema generates a JSON Schema from a Go struct type.

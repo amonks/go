@@ -33,8 +33,8 @@ func googleBudgetModel(id string) bool {
 
 type googleThinkingConfig struct {
 	ThinkingLevel   string `json:"thinkingLevel,omitempty"`
-	ThinkingBudget  *int   `json:"thinkingBudget,omitempty"`
-	IncludeThoughts bool   `json:"includeThoughts,omitempty"`
+	ThinkingBudget  *int   `json:"thinkingBudget,omitzero"`
+	IncludeThoughts bool   `json:"includeThoughts,omitzero"`
 }
 
 func googleThinking(id string, level ThinkingLevel) (*googleThinkingConfig, error) {

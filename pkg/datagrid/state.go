@@ -16,8 +16,8 @@ type State struct {
 	Search     string              `json:"search,omitempty"`
 	Filters    map[string][]string `json:"filters,omitempty"`
 	Sort       string              `json:"sort,omitempty"`
-	Descending bool                `json:"descending,omitempty"`
-	Page       int                 `json:"page,omitempty"`
+	Descending bool                `json:"descending,omitzero"`
+	Page       int                 `json:"page,omitzero"`
 }
 
 // QueryCodec reads and writes a grid's state without disturbing any other

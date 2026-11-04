@@ -35,7 +35,7 @@ const (
 type DecisionQuestion struct {
 	Type         DecisionType `json:"type"`
 	Instructions any          `json:"instructions"`
-	Criteria     any          `json:"criteria,omitempty"`
+	Criteria     any          `json:"criteria,omitzero"`
 }
 
 type DecisionRequest struct {
@@ -47,11 +47,11 @@ type DecisionRequest struct {
 // a probability, not a boolean; Score is a weighted value, not an integer.
 type DecisionAnswer struct {
 	Type          DecisionType       `json:"type"`
-	Noul          *float64           `json:"noul,omitempty"`
-	Choice        *string            `json:"choice,omitempty"`
-	Score         *float64           `json:"score,omitempty"`
+	Noul          *float64           `json:"noul,omitzero"`
+	Choice        *string            `json:"choice,omitzero"`
+	Score         *float64           `json:"score,omitzero"`
 	Probabilities map[string]float64 `json:"probabilities,omitempty"`
-	Confidence    *float64           `json:"confidence,omitempty"`
+	Confidence    *float64           `json:"confidence,omitzero"`
 	Legend        map[string]any     `json:"legend,omitempty"`
 }
 

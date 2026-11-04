@@ -234,9 +234,9 @@ func TestGoogleParallelToolsAndImageResults(t *testing.T) {
 	b, _ := json.Marshal(req)
 	var got struct {
 		Contents []struct {
-			Role  string
-			Parts []map[string]any
-		}
+			Role  string           `json:"role"`
+			Parts []map[string]any `json:"parts"`
+		} `json:"contents"`
 	}
 	if err := json.Unmarshal(b, &got); err != nil {
 		t.Fatal(err)
@@ -402,7 +402,9 @@ func TestGoogle25ToolImagesFollowAllResults(t *testing.T) {
 	}
 	b, _ := json.Marshal(req)
 	var wire struct {
-		Contents []struct{ Parts []map[string]any }
+		Contents []struct {
+			Parts []map[string]any `json:"parts"`
+		} `json:"contents"`
 	}
 	if err := json.Unmarshal(b, &wire); err != nil {
 		t.Fatal(err)
@@ -593,7 +595,9 @@ func TestGoogleReordersPositionalToolResultsWithTheirImages(t *testing.T) {
 					t.Fatal(err)
 				}
 				var decoded struct {
-					Contents []struct{ Parts []googlePart }
+					Contents []struct {
+						Parts []googlePart `json:"parts"`
+					} `json:"contents"`
 				}
 				if err := json.Unmarshal(wire, &decoded); err != nil {
 					t.Fatal(err)
@@ -677,7 +681,9 @@ func TestGooglePositionalResultsBecomeIdentifiedAcrossReplayScopes(t *testing.T)
 		}
 		wire, _ := json.Marshal(req)
 		var decoded struct {
-			Contents []struct{ Parts []googlePart }
+			Contents []struct {
+				Parts []googlePart `json:"parts"`
+			} `json:"contents"`
 		}
 		if err := json.Unmarshal(wire, &decoded); err != nil {
 			t.Fatal(err)

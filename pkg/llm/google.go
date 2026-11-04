@@ -28,12 +28,12 @@ type googleBlob struct {
 }
 
 type googlePart struct {
-	Text             *string                 `json:"text,omitempty"`
-	Thought          bool                    `json:"thought,omitempty"`
+	Text             *string                 `json:"text,omitzero"`
+	Thought          bool                    `json:"thought,omitzero"`
 	ThoughtSignature string                  `json:"thoughtSignature,omitempty"`
-	InlineData       *googleBlob             `json:"inlineData,omitempty"`
-	FunctionCall     *googleFunctionCall     `json:"functionCall,omitempty"`
-	FunctionResponse *googleFunctionResponse `json:"functionResponse,omitempty"`
+	InlineData       *googleBlob             `json:"inlineData,omitzero"`
+	FunctionCall     *googleFunctionCall     `json:"functionCall,omitzero"`
+	FunctionResponse *googleFunctionResponse `json:"functionResponse,omitzero"`
 }
 
 type googleFunctionCall struct {
@@ -41,7 +41,7 @@ type googleFunctionCall struct {
 	Name         string          `json:"name"`
 	Args         map[string]any  `json:"args"`
 	PartialArgs  json.RawMessage `json:"partialArgs,omitempty"`
-	WillContinue bool            `json:"willContinue,omitempty"`
+	WillContinue bool            `json:"willContinue,omitzero"`
 }
 
 type googleFunctionResponse struct {
@@ -71,17 +71,17 @@ type googleFunctionCallingConfig struct {
 }
 
 type googleGenerationConfig struct {
-	MaxOutputTokens int                   `json:"maxOutputTokens,omitempty"`
-	Temperature     *float64              `json:"temperature,omitempty"`
-	ThinkingConfig  *googleThinkingConfig `json:"thinkingConfig,omitempty"`
-	ResponseFormat  any                   `json:"responseFormat,omitempty"`
+	MaxOutputTokens int                   `json:"maxOutputTokens,omitzero"`
+	Temperature     *float64              `json:"temperature,omitzero"`
+	ThinkingConfig  *googleThinkingConfig `json:"thinkingConfig,omitzero"`
+	ResponseFormat  any                   `json:"responseFormat,omitzero"`
 }
 
 type googleRequest struct {
 	Contents          []googleContent        `json:"contents"`
-	SystemInstruction *googleContent         `json:"systemInstruction,omitempty"`
+	SystemInstruction *googleContent         `json:"systemInstruction,omitzero"`
 	Tools             []googleTool           `json:"tools,omitempty"`
-	ToolConfig        *googleToolConfig      `json:"toolConfig,omitempty"`
+	ToolConfig        *googleToolConfig      `json:"toolConfig,omitzero"`
 	GenerationConfig  googleGenerationConfig `json:"generationConfig"`
 }
 

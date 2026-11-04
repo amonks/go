@@ -92,7 +92,7 @@ func (ToolResultMessage) message() {}
 type TextContent struct {
 	// Message marks one provider assistant message boundary and its replay phase.
 	// Other adapters ignore it while retaining Text.
-	Message *MessageMetadata `json:"message,omitempty"`
+	Message *MessageMetadata `json:"message,omitzero"`
 	Type    string           // "text"
 	Text    string
 }
