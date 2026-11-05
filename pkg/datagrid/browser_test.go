@@ -3,7 +3,7 @@ package datagrid
 import (
 	"cmp"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net"
@@ -709,7 +709,7 @@ func TestBrowserInteractionsPreserveRowsURLAndGridIsolation(t *testing.T) {
 		URL     string   `json:"url"`
 	}
 	state := State{Filters: map[string][]string{"team": {"Research"}}, Page: 99}
-	stateJSON, _ := json.Marshal(state)
+	stateJSON, _ := json.Marshal(state, json.Deterministic(true))
 	expression := `(() => { const grid = document.querySelector('#people'); grid.setState(` + string(stateJSON) + `); return {
 		visible: [...grid.querySelectorAll('tr[data-dg-row]:not([hidden])')].map(r => r.dataset.dgRowId),
 		page: grid.getState().page,
@@ -1668,7 +1668,7 @@ func TestBrowserPipelineMatchesReferenceProperties(t *testing.T) {
 			state.Filters["tags"] = rapid.SampledFrom([][]string{{"math"}, {"types"}, {"compilers"}, {"math", "space"}}).Draw(t, "tags")
 		}
 
-		encoded, _ := json.Marshal(state)
+		encoded, _ := json.Marshal(state, json.Deterministic(true))
 		expression := `(() => { const grid = document.querySelector('#people'); grid.setState(` + string(encoded) + `); return {
 			visible: [...grid.querySelectorAll('tr[data-dg-row]:not([hidden])')].map(r => r.dataset.dgRowId),
 			state: grid.getState(),

@@ -9,7 +9,8 @@ package datagrid
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"regexp"
@@ -615,8 +616,10 @@ func featuresAttribute(disabled Feature) string {
 	return strings.Join(enabled, " ")
 }
 
+// Both of these fill a data attribute the grid's script parses, so a value a
+// page got from outside costs a replaced byte, never the attribute.
 func stateJSON(state State) string {
-	data, _ := json.Marshal(state)
+	data, _ := json.Marshal(state, json.Deterministic(true), jsontext.AllowInvalidUTF8(true))
 	return string(data)
 }
 
@@ -630,7 +633,7 @@ func filterValuesJSON(values []FilterValue) string {
 			normalized[i].Label = normalized[i].Value
 		}
 	}
-	data, _ := json.Marshal(normalized)
+	data, _ := json.Marshal(normalized, jsontext.AllowInvalidUTF8(true))
 	return string(data)
 }
 
