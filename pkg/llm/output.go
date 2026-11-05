@@ -3,30 +3,24 @@ package llm
 import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
-	"errors"
 	"fmt"
 	"io"
 	"reflect"
 	"slices"
 	"sort"
 	"strings"
+
+	"monks.co/pkg/lenientjson"
 )
 
 // answerText reads a structured answer. A number decodes into an any as a
 // jsontext.Value holding its literal text, which also marshals back as that
 // literal; going through a float64 would round the integers a schema promises.
 // The answer is what a model wrote, so it reads as the stream it came through
-// does: a repeated name's last value stands, and validation judges that.
-var answerText = json.JoinOptions(
-	jsontext.AllowDuplicateNames(true),
-	json.WithUnmarshalers(json.UnmarshalFromFunc(func(dec *jsontext.Decoder, v *any) error {
-		*v = nil
-		if dec.PeekKind() == jsontext.KindNumber {
-			*v = jsontext.Value(nil)
-		}
-		return errors.ErrUnsupported
-	})),
-)
+// does: a repeated name's last value stands, and validation judges that. A bad
+// byte stays refused: an answer with one is a failed answer, not a line in a
+// history to get past.
+var answerText = json.JoinOptions(jsontext.AllowDuplicateNames(true), lenientjson.LiteralNumbersOnly)
 
 // outputSchema makes a provider-specific copy. Tool schemas retain their own
 // optional-field semantics; strict output schemas close every object. OpenAI

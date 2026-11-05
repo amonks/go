@@ -276,6 +276,32 @@ func TestDecodeOutputIntegerRepresentations(t *testing.T) {
 	}
 }
 
+// An answer reads as the stream it came through does, so a repeated name's last
+// value stands whatever the types, at any depth. A bad byte is no part of that:
+// it stays refused.
+func TestDecodeOutputTakesRepeatedNamesButNotBadBytes(t *testing.T) {
+	type result struct {
+		Title  string `json:"title"`
+		Number int64  `json:"number"`
+		Nested []struct {
+			Number uint64 `json:"number"`
+		} `json:"nested"`
+	}
+	var dst result
+	msg := AssistantMessage{StopReason: StopReasonEnd, Content: []ContentBlock{TextContent{Text: `{"title":"t","number":{"no":1},"number":2,"nested":[{"number":"no","number":3}]}`}}}
+	if err := DecodeOutput(msg, &dst); err != nil {
+		t.Fatal(err)
+	}
+	if dst.Number != 2 || len(dst.Nested) != 1 || dst.Nested[0].Number != 3 {
+		t.Errorf("= %+v", dst)
+	}
+
+	msg = AssistantMessage{StopReason: StopReasonEnd, Content: []ContentBlock{TextContent{Text: "{\"title\":\"t\xff\",\"number\":2,\"nested\":[]}"}}}
+	if err := DecodeOutput(msg, &dst); err == nil || !strings.Contains(err.Error(), "invalid structured output JSON") {
+		t.Errorf("a bad byte: err = %v", err)
+	}
+}
+
 func TestUnknownProviderStopsKeepReason(t *testing.T) {
 	for _, tt := range []struct {
 		name, stream, reason string

@@ -7,9 +7,9 @@ package llm
 
 import (
 	"encoding/json/jsontext"
-	"encoding/json/v2"
-	"errors"
 	"time"
+
+	"monks.co/pkg/lenientjson"
 )
 
 // API represents the API style used by a provider.
@@ -287,15 +287,5 @@ type StreamOptions struct {
 // through the fleet: it holds what models and tools wrote, and provider items
 // kept verbatim for replay. Invalid UTF-8 or a repeated name in any of it
 // mustn't fail the turn, because a history is replayed whole and would fail
-// the same way on every retry; invalid bytes come out as U+FFFD in a decode into
-// Go values (a decode into a jsontext.Value keeps the raw bytes), and a repeated
-// name's last value stands (v2 alone would merge it into the one before and
-// refuse the pair when their types differ).
-var Passthrough = json.JoinOptions(
-	jsontext.AllowInvalidUTF8(true),
-	jsontext.AllowDuplicateNames(true),
-	json.WithUnmarshalers(json.UnmarshalFromFunc(func(_ *jsontext.Decoder, v *any) error {
-		*v = nil
-		return errors.ErrUnsupported
-	})),
-)
+// the same way on every retry.
+var Passthrough = lenientjson.Text
