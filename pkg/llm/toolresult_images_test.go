@@ -1,7 +1,7 @@
 package llm
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"strings"
 	"testing"
@@ -87,7 +87,7 @@ func TestAnthropicToolResultContentWireShape(t *testing.T) {
 	}
 	for _, tc := range cases {
 		result := convertMessagesToAnthropic(Model{}, []Message{tc.msg})
-		raw, err := json.Marshal(result[0].Content[0])
+		raw, err := json.Marshal(result[0].Content[0], json.Deterministic(true))
 		if err != nil {
 			t.Fatalf("%s: marshal: %v", tc.name, err)
 		}
@@ -98,7 +98,7 @@ func TestAnthropicToolResultContentWireShape(t *testing.T) {
 
 	empty := textToolResult("t1", "")
 	result := convertMessagesToAnthropic(Model{}, []Message{empty})
-	raw, err := json.Marshal(result[0].Content[0])
+	raw, err := json.Marshal(result[0].Content[0], json.Deterministic(true))
 	if err != nil {
 		t.Fatalf("empty: marshal: %v", err)
 	}

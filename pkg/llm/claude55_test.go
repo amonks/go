@@ -2,7 +2,7 @@ package llm
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"io"
 	"strings"
 	"testing"
@@ -92,7 +92,7 @@ func testClaude55ThinkingReplay(t *testing.T, id string) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		b, _ := json.Marshal(req.Messages)
+		b, _ := json.Marshal(req.Messages, json.Deterministic(true))
 		if strings.Contains(string(b), "signed-state") != (target.ID == model.ID && target.Provider == model.Provider && target.BaseURL == model.BaseURL) {
 			t.Errorf("replay on %s: %s", target.ID, b)
 		}

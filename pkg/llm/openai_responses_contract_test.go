@@ -2,7 +2,8 @@ package llm
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"io"
 	"strings"
 	"testing"
@@ -76,7 +77,7 @@ func TestResponsesRequestStatelessAndThinking(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			b, _ := json.Marshal(req)
+			b, _ := json.Marshal(req, json.Deterministic(true))
 			var v map[string]any
 			json.Unmarshal(b, &v)
 			if v["store"] != false {
@@ -93,9 +94,9 @@ func TestResponsesRequestStatelessAndThinking(t *testing.T) {
 }
 
 func TestOpaqueResponsesStateDoesNotReachOtherProviders(t *testing.T) {
-	messages := []Message{AssistantMessage{Content: []ContentBlock{OpaqueContent{API: APIOpenAIResponses, Model: "gpt-5.6-sol", Data: json.RawMessage(`{"type":"reasoning","encrypted_content":"secret-ciphertext"}`)}, TextContent{Text: "answer"}}}}
+	messages := []Message{AssistantMessage{Content: []ContentBlock{OpaqueContent{API: APIOpenAIResponses, Model: "gpt-5.6-sol", Data: jsontext.Value(`{"type":"reasoning","encrypted_content":"secret-ciphertext"}`)}, TextContent{Text: "answer"}}}}
 	for name, value := range map[string]any{"chat": convertMessagesToOpenAI(nil, messages), "anthropic": convertMessagesToAnthropic(Model{}, messages)} {
-		b, err := json.Marshal(value)
+		b, err := json.Marshal(value, json.Deterministic(true))
 		if err != nil {
 			t.Fatal(err)
 		}

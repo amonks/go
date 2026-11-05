@@ -2,7 +2,7 @@ package llm
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -30,7 +30,7 @@ func TestTransportCarriesEveryRequest(t *testing.T) {
 	t.Cleanup(func() { Transport = nil })
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"id": "claude-x", "max_input_tokens": 1000, "max_tokens": 100})
+		_ = json.MarshalWrite(w, map[string]any{"id": "claude-x", "max_input_tokens": 1000, "max_tokens": 100})
 	}))
 	defer srv.Close()
 	if _, err := ModelLimits(context.Background(), Model{ID: "claude-x", API: APIAnthropicMessages, BaseURL: srv.URL}); err != nil {

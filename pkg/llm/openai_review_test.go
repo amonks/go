@@ -2,7 +2,7 @@ package llm
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"io"
 	"math"
 	"strings"
@@ -89,7 +89,7 @@ func TestResponsesStreamPreservesMessagePhase(t *testing.T) {
 		}
 	}
 	for name, value := range map[string]any{"chat": convertMessagesToOpenAI(nil, []Message{msg}), "anthropic": convertMessagesToAnthropic(Model{}, []Message{msg})} {
-		b, err := json.Marshal(value)
+		b, err := json.Marshal(value, json.Deterministic(true))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -98,7 +98,7 @@ func TestResponsesStreamPreservesMessagePhase(t *testing.T) {
 		}
 	}
 	for _, different := range []Model{{ID: model.ID, Provider: "other"}, {ID: model.ID, Provider: model.Provider, BaseURL: "https://other.example"}} {
-		b, err := json.Marshal(convertMessagesToResponsesInputForModel(different, []Message{msg}))
+		b, err := json.Marshal(convertMessagesToResponsesInputForModel(different, []Message{msg}), json.Deterministic(true))
 		if err != nil {
 			t.Fatal(err)
 		}

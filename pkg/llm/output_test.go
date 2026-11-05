@@ -2,7 +2,7 @@ package llm
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"io"
 	"reflect"
 	"strings"
@@ -20,7 +20,7 @@ type outputFixture struct {
 
 func TestNativeOutputRequests(t *testing.T) {
 	schema := GenerateSchema(outputFixture{})
-	before, _ := json.Marshal(schema)
+	before, _ := json.Marshal(schema, json.Deterministic(true))
 	req := Request{OutputSchema: schema}
 	for _, api := range []API{APIAnthropicMessages, APIOpenAIResponses, APIOpenAICompletions} {
 		t.Run(string(api), func(t *testing.T) {
@@ -39,7 +39,7 @@ func TestNativeOutputRequests(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			data, _ := json.Marshal(request)
+			data, _ := json.Marshal(request, json.Deterministic(true))
 			var body map[string]any
 			json.Unmarshal(data, &body)
 			if _, ok := body["tools"]; ok {
@@ -73,7 +73,7 @@ func TestNativeOutputRequests(t *testing.T) {
 			}
 		})
 	}
-	after, _ := json.Marshal(schema)
+	after, _ := json.Marshal(schema, json.Deterministic(true))
 	if string(before) != string(after) {
 		t.Fatal("mutated caller schema")
 	}

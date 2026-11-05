@@ -4,7 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -111,7 +112,7 @@ func streamOpenAICompletions(ctx context.Context, model Model, req Request, opts
 		return nil, err
 	}
 
-	body, err := json.Marshal(openAIReq)
+	body, err := json.Marshal(openAIReq, json.Deterministic(true), Passthrough)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
@@ -149,7 +150,7 @@ func streamOpenAICompletions(ctx context.Context, model Model, req Request, opts
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		err := fmt.Errorf("openai API error (status %d): %s", resp.StatusCode, string(bodyBytes))
+		err := fmt.Errorf("openai API error (status %d): %s", resp.StatusCode, strings.ToValidUTF8(string(bodyBytes), "\uFFFD"))
 		return nil, &retryableError{
 			err:        err,
 			retryable:  isRetryable(resp.StatusCode),
@@ -272,7 +273,7 @@ func convertMessagesToOpenAI(systemBlocks []SystemBlock, messages []Message) []o
 					// Convert thinking to text for history
 					textParts = append(textParts, b.Thinking)
 				case ToolCall:
-					argsJSON, _ := json.Marshal(b.Arguments)
+					argsJSON, _ := json.Marshal(b.Arguments, json.Deterministic(true), Passthrough)
 					assistantMsg.ToolCalls = append(assistantMsg.ToolCalls, openAIToolCall{
 						ID:   b.ID,
 						Type: "function",
@@ -416,7 +417,7 @@ func processOpenAIStream(ctx context.Context, body io.ReadCloser, model Model, e
 		}
 
 		var chunk openAIStreamChunk
-		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+		if err := json.Unmarshal([]byte(data), &chunk, Passthrough); err != nil {
 			continue
 		}
 
@@ -502,7 +503,11 @@ func processOpenAIStream(ctx context.Context, body io.ReadCloser, model Model, e
 				for _, builder := range toolCalls {
 					if builder.arguments != "" {
 						var args map[string]any
-						json.Unmarshal([]byte(builder.arguments), &args)
+						// A call cut off mid-JSON has no arguments, not the ones
+						// decoded before the cut.
+						if err := json.Unmarshal([]byte(builder.arguments), &args, Passthrough); err != nil {
+							args = nil
+						}
 						// Update the tool call in content using tracked content index
 						if builder.contentIdx >= 0 && builder.contentIdx < len(partial.Content) {
 							if toolCall, ok := partial.Content[builder.contentIdx].(ToolCall); ok {
@@ -660,7 +665,7 @@ func streamOpenAIResponses(ctx context.Context, model Model, req Request, opts S
 		return nil, &retryableError{err: err, retryable: false}
 	}
 
-	body, err := json.Marshal(responsesReq)
+	body, err := json.Marshal(responsesReq, json.Deterministic(true), Passthrough)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
@@ -697,7 +702,7 @@ func streamOpenAIResponses(ctx context.Context, model Model, req Request, opts S
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		err := fmt.Errorf("openai responses API error (status %d): %s", resp.StatusCode, string(bodyBytes))
+		err := fmt.Errorf("openai responses API error (status %d): %s", resp.StatusCode, strings.ToValidUTF8(string(bodyBytes), "\uFFFD"))
 		return nil, &retryableError{
 			err:        err,
 			retryable:  isRetryable(resp.StatusCode),
@@ -897,14 +902,14 @@ func convertMessagesToResponsesInputForModel(model Model, messages []Message) an
 				case OpaqueContent:
 					if b.API == APIOpenAIResponses && b.Model == model.ID && b.Provider == model.Provider && b.BaseURL == model.BaseURL {
 						var item responsesItem
-						if json.Unmarshal(b.Data, &item) == nil && item.Type == "reasoning" && item.EncryptedContent != "" {
+						if json.Unmarshal(b.Data, &item, Passthrough) == nil && item.Type == "reasoning" && item.EncryptedContent != "" {
 							flushText()
-							items = append(items, json.RawMessage(b.Data))
+							items = append(items, jsontext.Value(b.Data))
 						}
 					}
 				case ToolCall:
 					flushText()
-					argsJSON, _ := json.Marshal(b.Arguments)
+					argsJSON, _ := json.Marshal(b.Arguments, json.Deterministic(true), Passthrough)
 					items = append(items, map[string]any{
 						"type":      "function_call",
 						"call_id":   b.ID,
@@ -1028,7 +1033,7 @@ func processResponsesStream(ctx context.Context, body io.ReadCloser, model Model
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 
 		var event responsesStreamEvent
-		if err := json.Unmarshal([]byte(data), &event); err != nil {
+		if err := json.Unmarshal([]byte(data), &event, Passthrough); err != nil {
 			fail(fmt.Errorf("decode OpenAI Responses event: %w", err))
 			return
 		}
@@ -1132,9 +1137,9 @@ func processResponsesStream(ctx context.Context, body io.ReadCloser, model Model
 			}
 			if event.Item != nil && event.Item.Type == "reasoning" {
 				var raw struct {
-					Item json.RawMessage `json:"item"`
+					Item jsontext.Value `json:"item"`
 				}
-				json.Unmarshal([]byte(data), &raw)
+				json.Unmarshal([]byte(data), &raw, Passthrough)
 				block := OpaqueContent{Type: "opaque", API: APIOpenAIResponses, Provider: model.Provider, Model: model.ID, BaseURL: model.BaseURL, Data: raw.Item}
 				if i, ok := reasoningIndices[event.Item.ID]; ok {
 					partial.Content[i] = block
@@ -1152,7 +1157,7 @@ func processResponsesStream(ctx context.Context, body io.ReadCloser, model Model
 					}
 					// An exhausted output budget may end a call in the middle of
 					// its JSON. Keep it incomplete until the terminal status is known.
-					if err := json.Unmarshal([]byte(builder.arguments), &args); err != nil {
+					if err := json.Unmarshal([]byte(builder.arguments), &args, Passthrough); err != nil {
 						args = nil
 					}
 					if builder.contentIdx >= 0 && builder.contentIdx < len(partial.Content) {
@@ -1221,10 +1226,10 @@ func processResponsesStream(ctx context.Context, body io.ReadCloser, model Model
 			if response.Output != nil {
 				var raw struct {
 					Response struct {
-						Output []json.RawMessage `json:"output"`
+						Output []jsontext.Value `json:"output"`
 					} `json:"response"`
 				}
-				json.Unmarshal([]byte(data), &raw)
+				json.Unmarshal([]byte(data), &raw, Passthrough)
 				content := make([]ContentBlock, 0, len(response.Output))
 				for i, item := range response.Output {
 					switch item.Type {
@@ -1239,7 +1244,7 @@ func processResponsesStream(ctx context.Context, body io.ReadCloser, model Model
 						content = append(content, responsesMessageText(model, item))
 					case "function_call":
 						var args map[string]any
-						err := json.Unmarshal([]byte(item.Arguments), &args)
+						err := json.Unmarshal([]byte(item.Arguments), &args, Passthrough)
 						if err != nil || args == nil {
 							if partial.StopReason != StopReasonMaxTokens {
 								fail(fmt.Errorf("invalid OpenAI function arguments for %s", item.Name))

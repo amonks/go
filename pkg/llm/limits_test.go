@@ -2,7 +2,7 @@ package llm
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -67,7 +67,7 @@ func TestOpenAIRequestOmitsUnknownCeiling(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, _ := json.Marshal(r)
+	b, _ := json.Marshal(r, json.Deterministic(true))
 	if strings.Contains(string(b), "max_tokens") {
 		t.Fatalf("max_tokens sent: %s", b)
 	}
@@ -83,7 +83,7 @@ func TestModelLimits(t *testing.T) {
 			http.Error(w, "bad request "+r.URL.Path, 400)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"id": "claude-x", "max_input_tokens": 1000000, "max_tokens": 128000})
+		_ = json.MarshalWrite(w, map[string]any{"id": "claude-x", "max_input_tokens": 1000000, "max_tokens": 128000})
 	}))
 	defer srv.Close()
 	got, err := ModelLimits(context.Background(), Model{ID: "claude-x", API: APIAnthropicMessages, BaseURL: srv.URL, APIKey: "k"})

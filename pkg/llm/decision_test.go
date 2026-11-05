@@ -2,7 +2,8 @@ package llm
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -27,8 +28,8 @@ func TestDecideWire(t *testing.T) {
 		if r.URL.Path != "/v1/systemone" || r.Method != "POST" || r.Header.Get("Authorization") != "Bearer secret" {
 			t.Errorf("bad request: %s %s", r.Method, r.URL.Path)
 		}
-		var body map[string]json.RawMessage
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		var body map[string]jsontext.Value
+		if err := json.UnmarshalRead(r.Body, &body); err != nil {
 			t.Error(err)
 		}
 		if string(body["model"]) != `"jev-latest"` || len(body) != 3 {
@@ -44,7 +45,7 @@ func TestDecideWire(t *testing.T) {
 	if got.Model != "jev-1.13.0" || got.Usage.InputTokens != 120 || got.Answers["urgent"].Noul == nil || *got.Answers["urgent"].Noul != 0 || *got.Answers["severity"].Score != 0 {
 		t.Fatalf("result=%+v", got)
 	}
-	raw, _ := json.Marshal(got)
+	raw, _ := json.Marshal(got, json.Deterministic(true))
 	if !strings.Contains(string(raw), `"noul":0`) || !strings.Contains(string(raw), `"confidence":1`) {
 		t.Fatal(string(raw))
 	}

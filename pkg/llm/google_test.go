@@ -2,7 +2,8 @@ package llm
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -24,7 +25,7 @@ func TestGoogleRequest(t *testing.T) {
 		Answer string  `json:"answer"`
 		Note   *string `json:"note"`
 	}{})
-	before, _ := json.Marshal(schema)
+	before, _ := json.Marshal(schema, json.Deterministic(true))
 	req, err := convertToGoogleRequest(model, Request{
 		System:   []SystemBlock{{Text: "One"}, {Text: "Two"}},
 		Messages: []Message{UserMessage{Content: []ContentBlock{TextContent{Text: "Look"}, ImageContent{Data: "aW1hZ2U=", MimeType: "image/png"}}}},
@@ -37,7 +38,7 @@ func TestGoogleRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, _ := json.Marshal(req)
+	b, _ := json.Marshal(req, json.Deterministic(true))
 	var got map[string]any
 	if err := json.Unmarshal(b, &got); err != nil {
 		t.Fatal(err)
@@ -58,7 +59,7 @@ func TestGoogleRequest(t *testing.T) {
 	if output["additionalProperties"] != false || !reflect.DeepEqual(output["required"], []any{"answer"}) {
 		t.Fatalf("output: %s", b)
 	}
-	after, _ := json.Marshal(schema)
+	after, _ := json.Marshal(schema, json.Deterministic(true))
 	if string(before) != string(after) {
 		t.Fatal("mutated caller schema")
 	}
@@ -127,7 +128,7 @@ func TestGoogleCapabilities(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, _ := json.Marshal(req)
+	b, _ := json.Marshal(req, json.Deterministic(true))
 	if !strings.Contains(string(b), `"thinkingBudget":0`) {
 		t.Fatalf("off omitted: %s", b)
 	}
@@ -191,7 +192,7 @@ func TestGoogleStreamTextThinkingUsageAndSignatures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wire, _ := json.Marshal(request)
+	wire, _ := json.Marshal(request, json.Deterministic(true))
 	if strings.Count(string(wire), "Hello ") != 1 || !strings.Contains(string(wire), `"text":"","thoughtSignature":"c2ln"`) {
 		t.Fatalf("replay: %s", wire)
 	}
@@ -202,7 +203,7 @@ func TestGoogleStreamTextThinkingUsageAndSignatures(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		b, _ := json.Marshal(r)
+		b, _ := json.Marshal(r, json.Deterministic(true))
 		if strings.Contains(string(b), "c2ln") || strings.Contains(string(b), "carefully") || !strings.Contains(string(b), "Hello world") {
 			t.Fatalf("foreign replay: %s", b)
 		}
@@ -231,7 +232,7 @@ func TestGoogleParallelToolsAndImageResults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, _ := json.Marshal(req)
+	b, _ := json.Marshal(req, json.Deterministic(true))
 	var got struct {
 		Contents []struct {
 			Role  string           `json:"role"`
@@ -374,7 +375,7 @@ func TestGoogleDoesNotForwardCredentialsOnRedirect(t *testing.T) {
 func TestGoogleTransferToolHistory(t *testing.T) {
 	msg := AssistantMessage{Content: []ContentBlock{
 		ThinkingContent{Thinking: "display only"},
-		OpaqueContent{API: APIOpenAIResponses, Data: json.RawMessage(`{"encrypted_content":"private"}`)},
+		OpaqueContent{API: APIOpenAIResponses, Data: jsontext.Value(`{"encrypted_content":"private"}`)},
 		TextContent{Text: "A preamble"},
 		ToolCall{ID: "external", Name: "look", Arguments: map[string]any{"at": "one"}},
 	}}
@@ -383,7 +384,7 @@ func TestGoogleTransferToolHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, _ := json.Marshal(req)
+	b, _ := json.Marshal(req, json.Deterministic(true))
 	if strings.Contains(string(b), "private") || strings.Contains(string(b), "display only") || !strings.Contains(string(b), "skip_thought_signature_validator") || !strings.Contains(string(b), `"name":"look"`) {
 		t.Fatalf("request=%s", b)
 	}
@@ -400,7 +401,7 @@ func TestGoogle25ToolImagesFollowAllResults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, _ := json.Marshal(req)
+	b, _ := json.Marshal(req, json.Deterministic(true))
 	var wire struct {
 		Contents []struct {
 			Parts []map[string]any `json:"parts"`
@@ -558,7 +559,7 @@ func googleWeatherCalls(t *testing.T, model Model, nativeIDs [2]string) (Assista
 		{FunctionCall: &googleFunctionCall{ID: nativeIDs[0], Name: "weather", Args: map[string]any{"city": "Paris"}}, ThoughtSignature: "c2ln"},
 		{FunctionCall: &googleFunctionCall{ID: nativeIDs[1], Name: "weather", Args: map[string]any{"city": "London"}}},
 	}
-	data, err := json.Marshal(map[string]any{"candidates": []any{map[string]any{"content": map[string]any{"parts": parts}, "finishReason": "STOP"}}})
+	data, err := json.Marshal(map[string]any{"candidates": []any{map[string]any{"content": map[string]any{"parts": parts}, "finishReason": "STOP"}}}, json.Deterministic(true))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -590,7 +591,7 @@ func TestGoogleReordersPositionalToolResultsWithTheirImages(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				wire, err := json.Marshal(req)
+				wire, err := json.Marshal(req, json.Deterministic(true))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -679,7 +680,7 @@ func TestGooglePositionalResultsBecomeIdentifiedAcrossReplayScopes(t *testing.T)
 		if err != nil {
 			t.Fatal(err)
 		}
-		wire, _ := json.Marshal(req)
+		wire, _ := json.Marshal(req, json.Deterministic(true))
 		var decoded struct {
 			Contents []struct {
 				Parts []googlePart `json:"parts"`

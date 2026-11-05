@@ -9,7 +9,8 @@ package llm
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"math"
@@ -77,7 +78,8 @@ func description(v any) bool {
 // normalized validates the JSON shape too, so direct Go callers and decoded
 // gateway requests obey the same rules (including typed maps and slices).
 func (r DecisionRequest) normalized() (DecisionRequest, error) {
-	b, err := json.Marshal(r)
+	// The plain Unmarshal below rounds llmproxy's raw-number Values to float64, so Decide's request body must stay built from req.
+	b, err := json.Marshal(r, json.Deterministic(true))
 	if err != nil {
 		return r, fmt.Errorf("decision request: %w", err)
 	}
@@ -208,7 +210,7 @@ func Decide(ctx context.Context, model Model, req DecisionRequest) (DecisionResp
 	body, err := json.Marshal(struct {
 		Model string `json:"model"`
 		DecisionRequest
-	}{model.ID, req})
+	}{model.ID, req}, json.Deterministic(true))
 	if err != nil {
 		return permanent(err)
 	}
@@ -242,12 +244,12 @@ func Decide(ctx context.Context, model Model, req DecisionRequest) (DecisionResp
 			Output *int `json:"output_tokens"`
 		} `json:"usage"`
 	}
-	decoder := json.NewDecoder(io.LimitReader(res.Body, 8<<20))
-	if err = decoder.Decode(&wire); err != nil {
+	decoder := jsontext.NewDecoder(io.LimitReader(res.Body, 8<<20))
+	if err = json.UnmarshalDecode(decoder, &wire); err != nil {
 		return permanent(fmt.Errorf("invalid typesafe response JSON"))
 	}
 	var extra any
-	if decoder.Decode(&extra) != io.EOF {
+	if json.UnmarshalDecode(decoder, &extra) != io.EOF {
 		return permanent(fmt.Errorf("invalid typesafe response trailer"))
 	}
 	if wire.Usage == nil || wire.Usage.Input == nil || wire.Usage.Output == nil {

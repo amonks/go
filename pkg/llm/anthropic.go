@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -133,7 +133,7 @@ func streamAnthropic(ctx context.Context, model Model, req Request, opts StreamO
 		return nil, err
 	}
 
-	body, err := json.Marshal(anthropicReq)
+	body, err := json.Marshal(anthropicReq, json.Deterministic(true), Passthrough)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
@@ -175,7 +175,7 @@ func streamAnthropic(ctx context.Context, model Model, req Request, opts StreamO
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		err := fmt.Errorf("anthropic API error (status %d): %s", resp.StatusCode, string(bodyBytes))
+		err := fmt.Errorf("anthropic API error (status %d): %s", resp.StatusCode, strings.ToValidUTF8(string(bodyBytes), "\uFFFD"))
 		return nil, &retryableError{
 			err:        err,
 			retryable:  isRetryable(resp.StatusCode),
@@ -534,7 +534,7 @@ func convertContentBlocksToAnthropic(model Model, blocks []ContentBlock) []anthr
 		case OpaqueContent:
 			if b.API == APIAnthropicMessages && b.Model == model.ID && b.Provider == model.Provider && b.BaseURL == model.BaseURL {
 				var item anthropicContent
-				if json.Unmarshal(b.Data, &item) == nil && ((item.Type == "thinking" && item.Thinking != nil && item.Signature != "") || (item.Type == "redacted_thinking" && item.Data != "")) {
+				if json.Unmarshal(b.Data, &item, Passthrough) == nil && ((item.Type == "thinking" && item.Thinking != nil && item.Signature != "") || (item.Type == "redacted_thinking" && item.Data != "")) {
 					result = append(result, item)
 				}
 			}
@@ -673,7 +673,7 @@ func processAnthropicStream(ctx context.Context, body io.ReadCloser, model Model
 		}
 
 		var event anthropicEvent
-		if err := json.Unmarshal([]byte(data), &event); err != nil {
+		if err := json.Unmarshal([]byte(data), &event, Passthrough); err != nil {
 			continue // Skip malformed events
 		}
 
@@ -755,7 +755,7 @@ func processAnthropicStream(ctx context.Context, body io.ReadCloser, model Model
 		case "content_block_stop":
 			if block, ok := thinkingBlocks[event.Index]; ok {
 				if block.Signature != "" || block.Data != "" {
-					data, _ := json.Marshal(block)
+					data, _ := json.Marshal(block, json.Deterministic(true), Passthrough)
 					partial.Content = append(partial.Content, OpaqueContent{Type: "opaque", API: APIAnthropicMessages, Provider: model.Provider, Model: model.ID, BaseURL: model.BaseURL, Data: data})
 				}
 				delete(thinkingBlocks, event.Index)
@@ -766,7 +766,7 @@ func processAnthropicStream(ctx context.Context, body io.ReadCloser, model Model
 					jsonStr := toolCallJSONs[event.Index]
 					if jsonStr != "" {
 						var args map[string]any
-						if err := json.Unmarshal([]byte(jsonStr), &args); err == nil {
+						if err := json.Unmarshal([]byte(jsonStr), &args, Passthrough); err == nil {
 							tc.Arguments = args
 							partial.Content[idx] = tc
 						}

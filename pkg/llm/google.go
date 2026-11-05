@@ -5,7 +5,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -37,11 +38,11 @@ type googlePart struct {
 }
 
 type googleFunctionCall struct {
-	ID           string          `json:"id,omitempty"`
-	Name         string          `json:"name"`
-	Args         map[string]any  `json:"args"`
-	PartialArgs  json.RawMessage `json:"partialArgs,omitempty"`
-	WillContinue bool            `json:"willContinue,omitzero"`
+	ID           string         `json:"id,omitempty"`
+	Name         string         `json:"name"`
+	Args         map[string]any `json:"args"`
+	PartialArgs  jsontext.Value `json:"partialArgs,omitempty"`
+	WillContinue bool           `json:"willContinue,omitzero"`
 }
 
 type googleFunctionResponse struct {
@@ -90,8 +91,8 @@ type googleRequest struct {
 // in AssistantMessage for other adapters and the UI. A matching replay block
 // replaces that whole assistant turn, so parts are never duplicated or reordered.
 type googleReplay struct {
-	Kind  string            `json:"kind"`
-	Parts []json.RawMessage `json:"parts"`
+	Kind  string           `json:"kind"`
+	Parts []jsontext.Value `json:"parts"`
 }
 
 func googleModelURL(model Model) string {
@@ -134,7 +135,7 @@ func googleModelLimits(ctx context.Context, model Model) (Limits, error) {
 		OutputTokenLimit           int      `json:"outputTokenLimit"`
 		SupportedGenerationMethods []string `json:"supportedGenerationMethods"`
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&metadata); err != nil {
+	if err := json.UnmarshalRead(io.LimitReader(resp.Body, 1<<20), &metadata); err != nil {
 		return Limits{}, fmt.Errorf("google model limits: invalid model metadata")
 	}
 	if metadata.Name != "models/"+model.ID || metadata.SupportedGenerationMethods == nil {
@@ -361,7 +362,7 @@ func googleAssistantParts(model Model, msg AssistantMessage, calls map[string]go
 				return nil, fmt.Errorf("google assistant history has duplicate replay state")
 			}
 			replay = new(googleReplay)
-			if err := json.Unmarshal(block.Data, replay); err != nil || replay.Kind != "google-content" || len(replay.Parts) == 0 {
+			if err := json.Unmarshal(block.Data, replay, Passthrough); err != nil || replay.Kind != "google-content" || len(replay.Parts) == 0 {
 				return nil, fmt.Errorf("google assistant history has invalid replay state")
 			}
 		}
@@ -371,7 +372,7 @@ func googleAssistantParts(model Model, msg AssistantMessage, calls map[string]go
 		callIndex := 0
 		for _, raw := range replay.Parts {
 			var part googlePart
-			if err := json.Unmarshal(raw, &part); err != nil {
+			if err := json.Unmarshal(raw, &part, Passthrough); err != nil {
 				return nil, fmt.Errorf("google replay part: %w", err)
 			}
 			if part.FunctionCall != nil {
@@ -389,8 +390,8 @@ func googleAssistantParts(model Model, msg AssistantMessage, calls map[string]go
 				if rawArguments == nil {
 					rawArguments = map[string]any{}
 				}
-				visibleArgs, err := json.Marshal(visibleArguments)
-				rawArgs, rawErr := json.Marshal(rawArguments)
+				visibleArgs, err := json.Marshal(visibleArguments, json.Deterministic(true))
+				rawArgs, rawErr := json.Marshal(rawArguments, json.Deterministic(true))
 				if visible.Name != part.FunctionCall.Name || err != nil || rawErr != nil || !bytes.Equal(visibleArgs, rawArgs) {
 					return nil, fmt.Errorf("google replay tools do not match visible history")
 				}
@@ -435,7 +436,7 @@ func streamGoogle(ctx context.Context, model Model, req Request, opts StreamOpti
 	if err != nil {
 		return nil, &retryableError{err: err}
 	}
-	body, err := json.Marshal(converted)
+	body, err := json.Marshal(converted, json.Deterministic(true), Passthrough)
 	if err != nil {
 		return nil, &retryableError{err: fmt.Errorf("marshal Google request: %w", err)}
 	}
@@ -457,7 +458,7 @@ func streamGoogle(ctx context.Context, model Model, req Request, opts StreamOpti
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		return nil, &retryableError{err: fmt.Errorf("google API error (status %d): %s", resp.StatusCode, body), retryable: isRetryable(resp.StatusCode), statusCode: resp.StatusCode}
+		return nil, &retryableError{err: fmt.Errorf("google API error (status %d): %s", resp.StatusCode, bytes.ToValidUTF8(body, []byte("\uFFFD"))), retryable: isRetryable(resp.StatusCode), statusCode: resp.StatusCode}
 	}
 	events := make(chan StreamEvent, 100)
 	done := make(chan AssistantMessage, 1)
@@ -470,8 +471,8 @@ type googleStreamResponse struct {
 	Candidates []struct {
 		Index   int `json:"index"`
 		Content struct {
-			Role  string            `json:"role"`
-			Parts []json.RawMessage `json:"parts"`
+			Role  string           `json:"role"`
+			Parts []jsontext.Value `json:"parts"`
 		} `json:"content"`
 		FinishReason  string `json:"finishReason"`
 		FinishMessage string `json:"finishMessage"`
@@ -499,7 +500,7 @@ func processGoogleStream(ctx context.Context, body io.ReadCloser, model Model, e
 	defer body.Close()
 	defer close(events)
 	partial := AssistantMessage{Role: "assistant", Model: model.ID, API: model.API, Provider: model.Provider, Timestamp: time.Now()}
-	var replayParts []json.RawMessage
+	var replayParts []jsontext.Value
 	terminal := false
 	toolCount := 0
 	toolIDs := make(map[string]bool)
@@ -525,7 +526,7 @@ func processGoogleStream(ctx context.Context, body io.ReadCloser, model Model, e
 			return
 		}
 		replayFinished = true
-		data, _ := json.Marshal(googleReplay{Kind: "google-content", Parts: replayParts})
+		data, _ := json.Marshal(googleReplay{Kind: "google-content", Parts: replayParts}, Passthrough)
 		partial.Content = append(partial.Content, OpaqueContent{Type: "opaque", API: model.API, Provider: model.Provider, Model: model.ID, BaseURL: model.BaseURL, Data: data})
 	}
 	fail := func(err error) {
@@ -580,7 +581,7 @@ func processGoogleStream(ctx context.Context, body io.ReadCloser, model Model, e
 	}
 	consume := func(data string) error {
 		var response googleStreamResponse
-		if err := json.Unmarshal([]byte(data), &response); err != nil {
+		if err := json.Unmarshal([]byte(data), &response, Passthrough); err != nil {
 			return fmt.Errorf("decode Google stream: %w", err)
 		}
 		if usage := response.UsageMetadata; usage != nil {
@@ -615,7 +616,7 @@ func processGoogleStream(ctx context.Context, body io.ReadCloser, model Model, e
 			}
 			for _, raw := range candidate.Content.Parts {
 				var part googlePart
-				if err := json.Unmarshal(raw, &part); err != nil {
+				if err := json.Unmarshal(raw, &part, Passthrough); err != nil {
 					return fmt.Errorf("decode Google part: %w", err)
 				}
 				replayParts = append(replayParts, raw)

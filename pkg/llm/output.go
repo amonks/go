@@ -1,13 +1,31 @@
 package llm
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"io"
 	"reflect"
 	"slices"
 	"sort"
 	"strings"
+)
+
+// answerText reads a structured answer. A number decodes into an any as a
+// jsontext.Value holding its literal text, which also marshals back as that
+// literal; going through a float64 would round the integers a schema promises.
+// The answer is what a model wrote, so it reads as the stream it came through
+// does: a repeated name's last value stands, and validation judges that.
+var answerText = json.JoinOptions(
+	jsontext.AllowDuplicateNames(true),
+	json.WithUnmarshalers(json.UnmarshalFromFunc(func(dec *jsontext.Decoder, v *any) error {
+		*v = nil
+		if dec.PeekKind() == jsontext.KindNumber {
+			*v = jsontext.Value(nil)
+		}
+		return errors.ErrUnsupported
+	})),
 )
 
 // outputSchema makes a provider-specific copy. Tool schemas retain their own
@@ -107,14 +125,13 @@ func validatedOutput(msg AssistantMessage, schema *Schema) (any, error) {
 			return nil, fmt.Errorf("llm: structured output contains non-text output")
 		}
 	}
-	dec := json.NewDecoder(strings.NewReader(text.String()))
-	dec.UseNumber()
+	dec := jsontext.NewDecoder(strings.NewReader(text.String()), answerText)
 	var value any
-	if err := dec.Decode(&value); err != nil {
+	if err := json.UnmarshalDecode(dec, &value); err != nil {
 		return nil, fmt.Errorf("llm: invalid structured output JSON: %w", err)
 	}
 	var extra any
-	if err := dec.Decode(&extra); err != io.EOF {
+	if err := json.UnmarshalDecode(dec, &extra); err != io.EOF {
 		return nil, fmt.Errorf("llm: structured output has trailing content")
 	}
 	if err := validateOutputValue(value, schema, "$", false); err != nil {
@@ -171,7 +188,7 @@ func validateOutputValue(value any, schema *Schema, path string, optional bool) 
 			return invalid()
 		}
 	case "integer", "number":
-		n, ok := value.(json.Number)
+		n, ok := value.(jsontext.Value)
 		if !ok {
 			return invalid()
 		}
@@ -268,7 +285,7 @@ func normalizeOutputIntegers(value any, schema *Schema) (any, error) {
 			array[i] = normalized
 		}
 	case "integer":
-		number := string(value.(json.Number))
+		number := string(value.(jsontext.Value))
 		negative := strings.HasPrefix(number, "-")
 		mantissa, exponent := number, ""
 		if i := strings.IndexAny(number, "eE"); i >= 0 {
@@ -280,7 +297,7 @@ func normalizeOutputIntegers(value any, schema *Schema) (any, error) {
 		}
 		digits := strings.TrimLeft(strings.ReplaceAll(strings.TrimPrefix(mantissa, "-"), ".", ""), "0")
 		if digits == "" {
-			return json.Number("0"), nil
+			return jsontext.Value("0"), nil
 		}
 		shift := boundedDecimalExponent(exponent, len(mantissa)+20) - fractional
 		if shift < 0 {
@@ -295,7 +312,7 @@ func normalizeOutputIntegers(value any, schema *Schema) (any, error) {
 		if negative {
 			digits = "-" + digits
 		}
-		return json.Number(digits), nil
+		return jsontext.Value(digits), nil
 	}
 	return value, nil
 }
@@ -320,7 +337,7 @@ func DecodeOutput(msg AssistantMessage, dst any) error {
 	if err != nil {
 		return err
 	}
-	data, err := json.Marshal(normalized)
+	data, err := json.Marshal(normalized, json.Deterministic(true))
 	if err != nil {
 		return fmt.Errorf("llm: normalize structured output: %w", err)
 	}
@@ -332,7 +349,7 @@ func DecodeOutput(msg AssistantMessage, dst any) error {
 	return nil
 }
 
-// encoding/json flattens untagged embedded fields, while GenerateSchema is
+// A JSON decode flattens untagged embedded fields, while GenerateSchema is
 // shared with tools and describes them as named properties. Reject that
 // mismatch for output decoding rather than accepting an answer as zero values.
 func validateOutputDestinationType(t reflect.Type, visiting map[reflect.Type]bool) error {

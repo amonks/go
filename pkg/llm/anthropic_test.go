@@ -2,7 +2,7 @@ package llm
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"io"
 	"strings"
 	"testing"
@@ -425,7 +425,7 @@ func TestConvertToAnthropicRequest_AdaptiveThinkingModels(t *testing.T) {
 
 	t.Run("budget_tokens omitted from adaptive thinking JSON", func(t *testing.T) {
 		anthropicReq := mustAnthropicRequest(t, Model{ID: "claude-sonnet-5"}, req, StreamOptions{ThinkingLevel: ThinkingMedium})
-		body, err := json.Marshal(anthropicReq)
+		body, err := json.Marshal(anthropicReq, json.Deterministic(true))
 		if err != nil {
 			t.Fatal(err)
 		}

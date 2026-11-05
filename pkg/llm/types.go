@@ -6,7 +6,9 @@
 package llm
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
+	"errors"
 	"time"
 )
 
@@ -121,12 +123,12 @@ func (ThinkingContent) contentBlock() {}
 // replay it only for the originating API, provider, endpoint, and model.
 // Data contains one provider item; callers must preserve it in conversation history.
 type OpaqueContent struct {
-	Type     string          `json:"type"`
-	API      API             `json:"api"`
-	Provider string          `json:"provider"`
-	Model    string          `json:"model"`
-	BaseURL  string          `json:"base_url,omitempty"`
-	Data     json.RawMessage `json:"data"`
+	Type     string         `json:"type"`
+	API      API            `json:"api"`
+	Provider string         `json:"provider"`
+	Model    string         `json:"model"`
+	BaseURL  string         `json:"base_url,omitempty"`
+	Data     jsontext.Value `json:"data"`
 }
 
 func (OpaqueContent) contentBlock() {}
@@ -280,3 +282,20 @@ type StreamOptions struct {
 	SessionID      string
 	UserAgent      string
 }
+
+// Passthrough is how a conversation is read and written anywhere on its way
+// through the fleet: it holds what models and tools wrote, and provider items
+// kept verbatim for replay. Invalid UTF-8 or a repeated name in any of it
+// mustn't fail the turn, because a history is replayed whole and would fail
+// the same way on every retry; invalid bytes come out as U+FFFD in a decode into
+// Go values (a decode into a jsontext.Value keeps the raw bytes), and a repeated
+// name's last value stands (v2 alone would merge it into the one before and
+// refuse the pair when their types differ).
+var Passthrough = json.JoinOptions(
+	jsontext.AllowInvalidUTF8(true),
+	jsontext.AllowDuplicateNames(true),
+	json.WithUnmarshalers(json.UnmarshalFromFunc(func(_ *jsontext.Decoder, v *any) error {
+		*v = nil
+		return errors.ErrUnsupported
+	})),
+)
