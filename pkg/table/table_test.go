@@ -36,6 +36,52 @@ func TestTruncateCellIgnoresANSICodes(t *testing.T) {
 	}
 }
 
+// A cell is data, often somebody else's: every control in it but SGR
+// styling is shown as a replacement character, never sent to the
+// terminal, and counts as one column; a style the cell sets ends with
+// the cell.
+func TestCellsCarryNoControlSequences(t *testing.T) {
+	value := "\x1b]52;c;cHduZWQ=\x07\x1b[1m" + strings.Repeat("a", cellMaxWidth-6) + "\u009b2J\x7f"
+
+	got := TruncateCell(value)
+
+	if strings.ContainsAny(got, "\x07\x7f\u009b") || strings.Contains(got, "\x1b]") {
+		t.Fatalf("control characters reached the cell: %q", got)
+	}
+	if !strings.HasSuffix(got, cellEllipsis+"\x1b[0m") || CellWidth(got) != cellMaxWidth {
+		t.Fatalf("cell = %q (width %d), want it truncated to %d and its style closed", got, CellWidth(got), cellMaxWidth)
+	}
+	out := Format([]string{"COL", "NEXT"}, [][]string{{"\x1b[8mhidden\x1b[2J", "shown"}})
+	if strings.Contains(out, "\x1b[2J") {
+		t.Fatalf("Format passed an erase through: %q", out)
+	}
+	if !strings.Contains(out, "\x1b[8mhidden\ufffd[2J\x1b[0m") {
+		t.Fatalf("Format should keep the cell's style and close it within the cell: %q", out)
+	}
+}
+
+// Printable keeps what multi-line text needs and nothing a terminal
+// would act on: C0 controls but newline and tab, DEL, the C1 controls,
+// and bytes that aren't UTF-8 (a lone 0x9b is CSI to an 8-bit
+// terminal) become U+FFFD; a CRLF is a newline.
+func TestPrintable(t *testing.T) {
+	for in, want := range map[string]string{
+		"plain text":                    "plain text",
+		"two\nlines\tand a tab":          "two\nlines\tand a tab",
+		"windows\r\nline":               "windows\nline",
+		"over\rwrite":                    "over\ufffdwrite",
+		"\x1b]52;c;cHduZWQ=\x07":         "\ufffd]52;c;cHduZWQ=\ufffd",
+		"\x1b[2J\x00\x7f":                "\ufffd[2J\ufffd\ufffd",
+		"c1 \u009b31m and \u0085":        "c1 \ufffd31m and \ufffd",
+		"raw \x9b byte":                  "raw \ufffd byte",
+		"unicode stays: café ✓ 漢字":       "unicode stays: café ✓ 漢字",
+	} {
+		if got := Printable(in); got != want {
+			t.Errorf("Printable(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestFormatNormalizesLineBreaks(t *testing.T) {
 	headers := []string{"COL"}
 	rows := [][]string{{"Hello\nWorld\r\nAgain\tTab"}}
