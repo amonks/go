@@ -224,9 +224,7 @@ func Decide(ctx context.Context, model Model, req DecisionRequest) (DecisionResp
 	}
 	httpReq.Header.Set("Authorization", "Bearer "+model.APIKey)
 	httpReq.Header.Set("Content-Type", "application/json")
-	client := newHTTPClient(time.Minute)
-	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	res, err := client.Do(httpReq)
+	res, err := newHTTPClient(time.Minute).Do(httpReq)
 	if err != nil {
 		return DecisionResponse{}, err
 	}

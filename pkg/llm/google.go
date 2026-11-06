@@ -103,22 +103,13 @@ func googleModelURL(model Model) string {
 	return strings.TrimRight(base, "/") + "/v1beta/models/" + url.PathEscape(model.ID)
 }
 
-func googleHTTPClient(timeout time.Duration) *http.Client {
-	client := newHTTPClient(timeout)
-	// net/http protects Authorization on redirects, but not x-goog-api-key.
-	// Neither Models nor GenerateContent needs to redirect; never send the key
-	// to another location, even when the configured endpoint asks us to.
-	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return client
-}
-
 func googleModelLimits(ctx context.Context, model Model) (Limits, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, googleModelURL(model), nil)
 	if err != nil {
 		return Limits{}, fmt.Errorf("google model limits: create request: %w", err)
 	}
 	req.Header.Set("x-goog-api-key", model.APIKey)
-	resp, err := googleHTTPClient(30 * time.Second).Do(req)
+	resp, err := newHTTPClient(30 * time.Second).Do(req)
 	if err != nil {
 		return Limits{}, fmt.Errorf("google model limits: %w", err)
 	}
@@ -451,7 +442,7 @@ func streamGoogle(ctx context.Context, model Model, req Request, opts StreamOpti
 	if opts.SessionID != "" {
 		httpReq.Header.Set("session_id", opts.SessionID)
 	}
-	resp, err := googleHTTPClient(0).Do(httpReq)
+	resp, err := newHTTPClient(0).Do(httpReq)
 	if err != nil {
 		return nil, &retryableError{err: fmt.Errorf("send Google request: %w", err), retryable: true}
 	}

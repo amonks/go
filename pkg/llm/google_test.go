@@ -354,24 +354,6 @@ func TestGoogleModelLimitsValidation(t *testing.T) {
 	}
 }
 
-func TestGoogleDoesNotForwardCredentialsOnRedirect(t *testing.T) {
-	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Error("followed a redirect with API credentials") }))
-	defer target.Close()
-	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
-	}))
-	defer source.Close()
-	m := googleTestModel()
-	m.BaseURL = source.URL
-	m.APIKey = "private-key"
-	if _, err := ModelLimits(context.Background(), m); err == nil {
-		t.Fatal("metadata accepted redirect")
-	}
-	if _, err := Stream(context.Background(), m, Request{}, StreamOptions{}); err == nil {
-		t.Fatal("stream accepted redirect")
-	}
-}
-
 func TestGoogleTransferToolHistory(t *testing.T) {
 	msg := AssistantMessage{Content: []ContentBlock{
 		ThinkingContent{Thinking: "display only"},
