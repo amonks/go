@@ -66,18 +66,45 @@ func TestCellsCarryNoControlSequences(t *testing.T) {
 // terminal) become U+FFFD; a CRLF is a newline.
 func TestPrintable(t *testing.T) {
 	for in, want := range map[string]string{
-		"plain text":                    "plain text",
-		"two\nlines\tand a tab":          "two\nlines\tand a tab",
-		"windows\r\nline":               "windows\nline",
-		"over\rwrite":                    "over\ufffdwrite",
-		"\x1b]52;c;cHduZWQ=\x07":         "\ufffd]52;c;cHduZWQ=\ufffd",
-		"\x1b[2J\x00\x7f":                "\ufffd[2J\ufffd\ufffd",
-		"c1 \u009b31m and \u0085":        "c1 \ufffd31m and \ufffd",
-		"raw \x9b byte":                  "raw \ufffd byte",
-		"unicode stays: café ✓ 漢字":       "unicode stays: café ✓ 漢字",
+		"plain text":               "plain text",
+		"two\nlines\tand a tab":    "two\nlines\tand a tab",
+		"windows\r\nline":          "windows\nline",
+		"over\rwrite":              "over\ufffdwrite",
+		"\x1b]52;c;cHduZWQ=\x07":   "\ufffd]52;c;cHduZWQ=\ufffd",
+		"\x1b[2J\x00\x7f":          "\ufffd[2J\ufffd\ufffd",
+		"c1 \u009b31m and \u0085":  "c1 \ufffd31m and \ufffd",
+		"raw \x9b byte":            "raw \ufffd byte",
+		"unicode stays: café ✓ 漢字": "unicode stays: café ✓ 漢字",
 	} {
 		if got := Printable(in); got != want {
 			t.Errorf("Printable(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// PrintableStyled is Printable for text whose styling is the point, a
+// build log a task runner colored: a well-formed SGR sequence survives,
+// every other control is replaced as Printable replaces it, and a line
+// that leaves a style set is closed with a reset, so nothing one line
+// says about style outlasts it.
+func TestPrintableStyled(t *testing.T) {
+	for in, want := range map[string]string{
+		"plain text":            "plain text",
+		"two\nlines\tand a tab": "two\nlines\tand a tab",
+		"windows\r\nline":       "windows\nline",
+		"\x1b[3;38;2;253;246;227mstarting\x1b[m\nexit ok": "\x1b[3;38;2;253;246;227mstarting\x1b[m\nexit ok",
+		"\x1b[31mred\nplain":                              "\x1b[31mred\x1b[0m\nplain",
+		"\x1b[8mhidden":                                   "\x1b[8mhidden\x1b[0m",
+		"\x1b[1mbold\x1b[0m":                              "\x1b[1mbold\x1b[0m",
+		"\x1b]52;c;cHduZWQ=\x07":                          "\ufffd]52;c;cHduZWQ=\ufffd",
+		"\x1b[2J\x00\x7f":                                 "\ufffd[2J\ufffd\ufffd",
+		"c1 \u009b31m and \u0085":                         "c1 \ufffd31m and \ufffd",
+		"raw \x9b byte":                                   "raw \ufffd byte",
+		"over\rwrite":                                     "over\ufffdwrite",
+		"unicode stays: café ✓ 漢字":                        "unicode stays: café ✓ 漢字",
+	} {
+		if got := PrintableStyled(in); got != want {
+			t.Errorf("PrintableStyled(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

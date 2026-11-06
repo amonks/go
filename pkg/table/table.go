@@ -4,7 +4,8 @@
 // no borders, automatic terminal width detection, ANSI-aware
 // column sizing, and cell normalization (tabs/newlines → spaces,
 // control characters other than SGR styling made visible). Printable
-// is the same terminal-safety for text a CLI prints outside a table.
+// is the same terminal-safety for text a CLI prints outside a table,
+// and PrintableStyled the same again for text whose SGR styling is kept.
 package table
 
 import (
@@ -237,6 +238,48 @@ func Printable(s string) string {
 		}
 		return r
 	}, s)
+}
+
+// PrintableStyled is Printable for text whose styling is the point — a
+// build log a task runner colored — and which is still text the CLI did
+// not write. A well-formed SGR sequence survives, since SGR only styles
+// text; every other control is replaced as Printable replaces it. A line
+// that leaves a style set is closed with a reset before its newline, as
+// a cell is at its end, so nothing one line says about style (concealed
+// text, say) outlasts it. Text that sets nothing comes back unchanged.
+func PrintableStyled(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	var b strings.Builder
+	styled := false
+	for i := 0; i < len(s); {
+		if n := sgrLen(s[i:]); n > 0 {
+			seq := s[i : i+n]
+			b.WriteString(seq)
+			styled = seq != "\x1b[m" && seq != sgrReset
+			i += n
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(s[i:])
+		switch {
+		case r == '\n':
+			if styled {
+				b.WriteString(sgrReset)
+				styled = false
+			}
+			b.WriteByte('\n')
+		case r == '\t':
+			b.WriteByte('\t')
+		case (r == utf8.RuneError && size == 1) || unicode.IsControl(r):
+			b.WriteRune(utf8.RuneError)
+		default:
+			b.WriteString(s[i : i+size])
+		}
+		i += size
+	}
+	if styled {
+		b.WriteString(sgrReset)
+	}
+	return b.String()
 }
 
 func truncateVisible(value string, max int) string {
