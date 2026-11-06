@@ -63,13 +63,11 @@ func TestNativeOutputRequests(t *testing.T) {
 				t.Fatal("object is not closed")
 			}
 			details := wire["properties"].(map[string]any)["details"].(map[string]any)
-			if api != APIAnthropicMessages {
-				if len(wire["required"].([]any)) != 4 {
-					t.Fatal("OpenAI needs every property required")
-				}
-				if len(details["anyOf"].([]any)) != 2 {
-					t.Fatal("optional property is not nullable")
-				}
+			if len(wire["required"].([]any)) != 4 {
+				t.Fatal("every property must be required, an optional one as nullable")
+			}
+			if len(details["anyOf"].([]any)) != 2 {
+				t.Fatal("optional property is not nullable")
 			}
 		})
 	}
@@ -119,6 +117,32 @@ func TestDecodeOutput(t *testing.T) {
 		Value string `json:"value" jsonschema:"optional"`
 	}{}) {
 		t.Fatal(dst)
+	}
+}
+
+// Anthropic and OpenAI receive every optional property as required and
+// nullable, so their models write null where it would otherwise be left
+// out. The two answers read alike: each validates and decodes to the zero
+// value, replacing whatever the destination held.
+func TestOptionalNullReadsAsAbsent(t *testing.T) {
+	type answer struct {
+		Title string  `json:"title"`
+		Note  *string `json:"note"`
+		Extra string  `json:"extra" jsonschema:"optional"`
+	}
+	schema := GenerateSchema(answer{})
+	for _, text := range []string{`{"title":"A","note":null,"extra":null}`, `{"title":"A"}`} {
+		msg := AssistantMessage{StopReason: StopReasonEnd, Content: []ContentBlock{TextContent{Text: text}}}
+		if err := ValidateOutput(msg, schema); err != nil {
+			t.Errorf("%s: %v", text, err)
+		}
+		got := answer{Note: new("stale"), Extra: "stale"}
+		if err := DecodeOutput(msg, &got); err != nil {
+			t.Errorf("%s: %v", text, err)
+		}
+		if got != (answer{Title: "A"}) {
+			t.Errorf("%s decoded as %+v", text, got)
+		}
 	}
 }
 
@@ -174,8 +198,9 @@ func TestNativeOutputRejectsUnsupportedSchemaAndModel(t *testing.T) {
 	for _, schema := range []*Schema{
 		{Type: "string"},
 		{Type: "object"},
-		{Type: "object", Properties: map[string]*Schema{"child": nil}},
-		{Type: "object", Properties: map[string]*Schema{}, Required: []string{"missing"}},
+		{Type: "object", Properties: Properties{{Name: "child"}}},
+		{Type: "object", Properties: Properties{{Name: "twice", Schema: Schema{Type: "string"}}, {Name: "twice", Schema: Schema{Type: "string"}}}},
+		{Type: "object", Properties: Properties{}, Required: []string{"missing"}},
 	} {
 		if _, err := convertToResponsesRequest(Model{ID: "gpt-6-astra", API: APIOpenAIResponses}, Request{OutputSchema: schema}, StreamOptions{}); err == nil {
 			t.Fatalf("accepted invalid schema %+v", schema)
@@ -195,15 +220,23 @@ func TestOutputSchemaNestedAndToolIsolation(t *testing.T) {
 	if !reflect.DeepEqual(req.Tools[0].Parameters, schema) {
 		t.Fatal("altered tool schema")
 	}
-	wire, err := outputSchema(schema, true)
+	converted, err := outputSchema(schema, APIOpenAIResponses)
 	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(converted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire map[string]any
+	if err := json.Unmarshal(data, &wire); err != nil {
 		t.Fatal(err)
 	}
 	nested := wire["properties"].(map[string]any)["details"].(map[string]any)["anyOf"].([]any)[0].(map[string]any)
 	if nested["additionalProperties"] != false {
 		t.Fatal("nested object must be closed")
 	}
-	if !reflect.DeepEqual(nested["required"], []string{"count"}) {
+	if !reflect.DeepEqual(nested["required"], []any{"count"}) {
 		t.Fatal(nested)
 	}
 }

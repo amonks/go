@@ -22,12 +22,12 @@ func TestGenerateSchema_SimpleStruct(t *testing.T) {
 		t.Errorf("Properties count = %d, want 2", len(schema.Properties))
 	}
 
-	if schema.Properties["name"].Type != "string" {
-		t.Errorf("name.Type = %q, want %q", schema.Properties["name"].Type, "string")
+	if schema.Properties.Get("name").Type != "string" {
+		t.Errorf("name.Type = %q, want %q", schema.Properties.Get("name").Type, "string")
 	}
 
-	if schema.Properties["age"].Type != "integer" {
-		t.Errorf("age.Type = %q, want %q", schema.Properties["age"].Type, "integer")
+	if schema.Properties.Get("age").Type != "integer" {
+		t.Errorf("age.Type = %q, want %q", schema.Properties.Get("age").Type, "integer")
 	}
 
 	// Non-pointer fields should be required
@@ -47,12 +47,12 @@ func TestGenerateSchema_WithDescriptions(t *testing.T) {
 
 	schema := GenerateSchema(Params{})
 
-	if schema.Properties["a"].Description != "First number" {
-		t.Errorf("a.Description = %q, want %q", schema.Properties["a"].Description, "First number")
+	if schema.Properties.Get("a").Description != "First number" {
+		t.Errorf("a.Description = %q, want %q", schema.Properties.Get("a").Description, "First number")
 	}
 
-	if schema.Properties["b"].Description != "Second number" {
-		t.Errorf("b.Description = %q, want %q", schema.Properties["b"].Description, "Second number")
+	if schema.Properties.Get("b").Description != "Second number" {
+		t.Errorf("b.Description = %q, want %q", schema.Properties.Get("b").Description, "Second number")
 	}
 }
 
@@ -70,22 +70,22 @@ func TestGenerateSchema_DescriptionKeepsCommas(t *testing.T) {
 
 	schema := GenerateSchema(Params{})
 
-	if got, want := schema.Properties["reason"].Description, "One short, specific sentence, with commas"; got != want {
+	if got, want := schema.Properties.Get("reason").Description, "One short, specific sentence, with commas"; got != want {
 		t.Errorf("reason.Description = %q, want %q", got, want)
 	}
-	if got, want := schema.Properties["op"].Description, "The operation, one of the listed ones"; got != want {
+	if got, want := schema.Properties.Get("op").Description, "The operation, one of the listed ones"; got != want {
 		t.Errorf("op.Description = %q, want %q", got, want)
 	}
-	if got, want := schema.Properties["op"].Enum, []string{"add", "sub"}; !reflect.DeepEqual(got, want) {
+	if got, want := schema.Properties.Get("op").Enum, []string{"add", "sub"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("op.Enum = %v, want %v", got, want)
 	}
-	if got, want := schema.Properties["note"].Description, "Optional, but welcome"; got != want {
+	if got, want := schema.Properties.Get("note").Description, "Optional, but welcome"; got != want {
 		t.Errorf("note.Description = %q, want %q", got, want)
 	}
 	if !slices.Contains(schema.Required, "note") {
 		t.Errorf("note should be required; Required = %v", schema.Required)
 	}
-	if got, want := schema.Properties["tail"].Description, "Trailing, comma-bearing"; got != want {
+	if got, want := schema.Properties.Get("tail").Description, "Trailing, comma-bearing"; got != want {
 		t.Errorf("tail.Description = %q, want %q", got, want)
 	}
 }
@@ -97,13 +97,13 @@ func TestGenerateSchema_WithEnums(t *testing.T) {
 
 	schema := GenerateSchema(Params{})
 
-	if len(schema.Properties["operation"].Enum) != 4 {
-		t.Errorf("operation.Enum count = %d, want 4", len(schema.Properties["operation"].Enum))
+	if len(schema.Properties.Get("operation").Enum) != 4 {
+		t.Errorf("operation.Enum count = %d, want 4", len(schema.Properties.Get("operation").Enum))
 	}
 
 	expected := []string{"add", "subtract", "multiply", "divide"}
-	if !reflect.DeepEqual(schema.Properties["operation"].Enum, expected) {
-		t.Errorf("operation.Enum = %v, want %v", schema.Properties["operation"].Enum, expected)
+	if !reflect.DeepEqual(schema.Properties.Get("operation").Enum, expected) {
+		t.Errorf("operation.Enum = %v, want %v", schema.Properties.Get("operation").Enum, expected)
 	}
 }
 
@@ -135,12 +135,62 @@ func TestGenerateSchema_Nested(t *testing.T) {
 
 	schema := GenerateSchema(Outer{})
 
-	if schema.Properties["inner"].Type != "object" {
-		t.Errorf("inner.Type = %q, want %q", schema.Properties["inner"].Type, "object")
+	if schema.Properties.Get("inner").Type != "object" {
+		t.Errorf("inner.Type = %q, want %q", schema.Properties.Get("inner").Type, "object")
 	}
 
-	if schema.Properties["inner"].Properties["value"].Type != "string" {
-		t.Errorf("inner.value.Type = %q, want %q", schema.Properties["inner"].Properties["value"].Type, "string")
+	if schema.Properties.Get("inner").Properties.Get("value").Type != "string" {
+		t.Errorf("inner.value.Type = %q, want %q", schema.Properties.Get("inner").Properties.Get("value").Type, "string")
+	}
+}
+
+// Properties follow the struct's declaration order at every depth — in
+// slices, behind pointers, and inside an embedded field, which stays one
+// property at its own position.
+func TestGenerateSchema_DeclarationOrder(t *testing.T) {
+	type Meta struct {
+		Second string `json:"second"`
+		First  string `json:"first"`
+	}
+	type Params struct {
+		Meta     `json:"meta"`
+		Headline string `json:"headline"`
+		Cards    []struct {
+			Title   string `json:"title"`
+			Summary string `json:"summary"`
+		} `json:"cards"`
+		Aside *struct {
+			Zeta  string `json:"zeta"`
+			Alpha string `json:"alpha"`
+		} `json:"aside"`
+		Count int `json:"count"`
+	}
+
+	schema := GenerateSchema(Params{})
+
+	names := func(p Properties) []string {
+		var out []string
+		for _, property := range p {
+			out = append(out, property.Name)
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		label string
+		got   Properties
+		want  []string
+	}{
+		{"top", schema.Properties, []string{"meta", "headline", "cards", "aside", "count"}},
+		{"meta", schema.Properties.Get("meta").Properties, []string{"second", "first"}},
+		{"card", schema.Properties.Get("cards").Items.Properties, []string{"title", "summary"}},
+		{"aside", schema.Properties.Get("aside").Properties, []string{"zeta", "alpha"}},
+	} {
+		if got := names(tc.got); !slices.Equal(got, tc.want) {
+			t.Errorf("%s properties = %q, want %q", tc.label, got, tc.want)
+		}
+	}
+	if want := []string{"meta", "headline", "cards", "count"}; !slices.Equal(schema.Required, want) {
+		t.Errorf("Required = %q, want %q", schema.Required, want)
 	}
 }
 
@@ -151,12 +201,12 @@ func TestGenerateSchema_Slice(t *testing.T) {
 
 	schema := GenerateSchema(Params{})
 
-	if schema.Properties["items"].Type != "array" {
-		t.Errorf("items.Type = %q, want %q", schema.Properties["items"].Type, "array")
+	if schema.Properties.Get("items").Type != "array" {
+		t.Errorf("items.Type = %q, want %q", schema.Properties.Get("items").Type, "array")
 	}
 
-	if schema.Properties["items"].Items.Type != "string" {
-		t.Errorf("items.Items.Type = %q, want %q", schema.Properties["items"].Items.Type, "string")
+	if schema.Properties.Get("items").Items.Type != "string" {
+		t.Errorf("items.Items.Type = %q, want %q", schema.Properties.Get("items").Items.Type, "string")
 	}
 }
 
@@ -167,8 +217,8 @@ func TestGenerateSchema_Bool(t *testing.T) {
 
 	schema := GenerateSchema(Params{})
 
-	if schema.Properties["flag"].Type != "boolean" {
-		t.Errorf("flag.Type = %q, want %q", schema.Properties["flag"].Type, "boolean")
+	if schema.Properties.Get("flag").Type != "boolean" {
+		t.Errorf("flag.Type = %q, want %q", schema.Properties.Get("flag").Type, "boolean")
 	}
 }
 
@@ -202,7 +252,7 @@ func TestGenerateSchema_SkipUnexported(t *testing.T) {
 		t.Errorf("Properties count = %d, want 1", len(schema.Properties))
 	}
 
-	if _, ok := schema.Properties["public"]; !ok {
+	if schema.Properties.Get("public") == nil {
 		t.Error("public should be in Properties")
 	}
 }
@@ -219,7 +269,7 @@ func TestGenerateSchema_SkipJSONDash(t *testing.T) {
 		t.Errorf("Properties count = %d, want 1", len(schema.Properties))
 	}
 
-	if _, ok := schema.Properties["include"]; !ok {
+	if schema.Properties.Get("include") == nil {
 		t.Error("include should be in Properties")
 	}
 }

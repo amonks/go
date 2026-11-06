@@ -57,10 +57,34 @@ type googleTool struct {
 }
 
 type googleFunctionDeclaration struct {
-	Name        string  `json:"name"`
-	Description string  `json:"description,omitempty"`
-	Parameters  *Schema `json:"parametersJsonSchema"`
+	Name        string       `json:"name"`
+	Description string       `json:"description,omitempty"`
+	Parameters  googleSchema `json:"parametersJsonSchema"`
 }
+
+// googleSchema is a tool's Schema as Gemini reads it: the same JSON Schema,
+// with propertyOrdering beside every object's properties, nested ones too.
+// Gemini's JSON Schema accepts that non-standard keyword as the order to
+// write the members in, the order the properties already go out in.
+type googleSchema struct{ schema *Schema }
+
+func (g googleSchema) MarshalJSONTo(enc *jsontext.Encoder) error {
+	return json.MarshalEncode(enc, g.schema, withPropertyOrdering)
+}
+
+// withPropertyOrdering marshals each Schema, including those nested in it,
+// with its property names as propertyOrdering.
+var withPropertyOrdering = json.WithMarshalers(json.MarshalToFunc(func(enc *jsontext.Encoder, s *Schema) error {
+	type plain Schema
+	var names []string
+	for _, p := range s.Properties {
+		names = append(names, p.Name)
+	}
+	return json.MarshalEncode(enc, struct {
+		*plain
+		PropertyOrdering []string `json:"propertyOrdering,omitzero"`
+	}{(*plain)(s), names})
+}))
 
 type googleToolConfig struct {
 	FunctionCallingConfig googleFunctionCallingConfig `json:"functionCallingConfig"`
@@ -184,7 +208,7 @@ func convertToGoogleRequest(model Model, req Request, opts StreamOptions) (googl
 	if len(req.Tools) > 0 {
 		var declarations []googleFunctionDeclaration
 		for _, tool := range req.Tools {
-			declarations = append(declarations, googleFunctionDeclaration{Name: tool.Name, Description: tool.Description, Parameters: GenerateSchema(tool.Parameters)})
+			declarations = append(declarations, googleFunctionDeclaration{Name: tool.Name, Description: tool.Description, Parameters: googleSchema{GenerateSchema(tool.Parameters)}})
 		}
 		out.Tools = []googleTool{{FunctionDeclarations: declarations}}
 	}

@@ -75,9 +75,9 @@ func (m Model) SupportsStructuredOutput() bool {
 	return false
 }
 
-func structuredRequestSchema(model Model, schema *Schema) (map[string]any, error) {
+func structuredRequestSchema(model Model, schema *Schema) (jsonObject, error) {
 	if !model.SupportsStructuredOutput() {
 		return nil, fmt.Errorf("llm: model %s has no documented native structured-output capability", model.ID)
 	}
-	return outputSchema(schema, model.API == APIOpenAICompletions || model.API == APIOpenAIResponses)
+	return outputSchema(schema, model.API)
 }

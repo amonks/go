@@ -7,7 +7,6 @@ import (
 	"io"
 	"reflect"
 	"slices"
-	"sort"
 	"strings"
 
 	"monks.co/pkg/lenientjson"
@@ -23,72 +22,109 @@ import (
 var answerText = json.JoinOptions(jsontext.AllowDuplicateNames(true), lenientjson.LiteralNumbersOnly)
 
 // outputSchema makes a provider-specific copy. Tool schemas retain their own
-// optional-field semantics; strict output schemas close every object. OpenAI
-// requires all properties and represents absent optionals with null.
-func outputSchema(schema *Schema, openAI bool) (map[string]any, error) {
+// optional-field semantics; strict output schemas close every object and make
+// optional properties nullable. The properties keep their declared order, the
+// order the answer is written in. Anthropic and OpenAI get every property
+// required, an absent optional written as null: OpenAI's strict mode demands
+// it, and Anthropic writes required properties before optional ones, which
+// would move an optional property behind the rest. Gemini keeps optional
+// properties optional and gets the order spelled out as propertyOrdering. An
+// empty api builds the copy only to check the schema.
+func outputSchema(schema *Schema, api API) (jsonObject, error) {
 	if schema == nil || schema.Type != "object" {
 		return nil, fmt.Errorf("llm: output schema must describe an object")
 	}
-	return outputSchemaNode(schema, openAI, 0)
+	return outputSchemaNode(schema, api, 0)
 }
 
-func outputSchemaNode(schema *Schema, openAI bool, depth int) (map[string]any, error) {
+func outputSchemaNode(schema *Schema, api API, depth int) (jsonObject, error) {
 	if schema == nil || depth > 64 {
 		return nil, fmt.Errorf("llm: invalid or recursive output schema")
 	}
-	result := map[string]any{"type": schema.Type}
+	result := jsonObject{{"type", schema.Type}}
 	if schema.Description != "" {
-		result["description"] = schema.Description
+		result = append(result, jsonMember{"description", schema.Description})
 	}
 	if len(schema.Enum) > 0 {
 		if schema.Type != "string" {
 			return nil, fmt.Errorf("llm: output enums require string type")
 		}
-		result["enum"] = slices.Clone(schema.Enum)
+		result = append(result, jsonMember{"enum", slices.Clone(schema.Enum)})
 	}
 	switch schema.Type {
 	case "object":
 		if schema.Properties == nil {
 			return nil, fmt.Errorf("llm: output objects require declared properties")
 		}
-		properties := make(map[string]any, len(schema.Properties))
-		required := slices.Clone(schema.Required)
-		for _, name := range required {
-			if _, ok := schema.Properties[name]; !ok {
+		for _, name := range schema.Required {
+			if schema.Properties.Get(name) == nil {
 				return nil, fmt.Errorf("llm: required output property %q is undeclared", name)
 			}
 		}
-		for name, property := range schema.Properties {
-			converted, err := outputSchemaNode(property, openAI, depth+1)
+		google := api == APIGoogleGenerateContent
+		properties := make(jsonObject, 0, len(schema.Properties))
+		names := make([]string, 0, len(schema.Properties))
+		required := []string{}
+		for i := range schema.Properties {
+			property := &schema.Properties[i]
+			if slices.Contains(names, property.Name) {
+				return nil, fmt.Errorf("llm: output property %q is declared twice", property.Name)
+			}
+			names = append(names, property.Name)
+			converted, err := outputSchemaNode(&property.Schema, api, depth+1)
 			if err != nil {
 				return nil, err
 			}
-			if !slices.Contains(schema.Required, name) {
-				converted = map[string]any{"anyOf": []any{converted, map[string]any{"type": "null"}}}
-				if openAI {
-					required = append(required, name)
-				}
+			optional := !slices.Contains(schema.Required, property.Name)
+			if optional {
+				converted = jsonObject{{"anyOf", []any{converted, jsonObject{{"type", "null"}}}}}
 			}
-			properties[name] = converted
+			if !optional || !google {
+				required = append(required, property.Name)
+			}
+			properties = append(properties, jsonMember{property.Name, converted})
 		}
-		sort.Strings(required)
-		if required == nil {
-			required = []string{}
+		result = append(result, jsonMember{"properties", properties})
+		if google && len(names) > 0 {
+			result = append(result, jsonMember{"propertyOrdering", names})
 		}
-		result["properties"] = properties
-		result["required"] = required
-		result["additionalProperties"] = false
+		result = append(result, jsonMember{"required", required}, jsonMember{"additionalProperties", false})
 	case "array":
-		items, err := outputSchemaNode(schema.Items, openAI, depth+1)
+		items, err := outputSchemaNode(schema.Items, api, depth+1)
 		if err != nil {
 			return nil, err
 		}
-		result["items"] = items
+		result = append(result, jsonMember{"items", items})
 	case "string", "integer", "number", "boolean":
 	default:
 		return nil, fmt.Errorf("llm: unsupported output schema type %q", schema.Type)
 	}
 	return result, nil
+}
+
+// jsonObject is a JSON object written in member order, whatever the
+// encoder's options: the output schema is built of these so its properties
+// reach the provider in declaration order, where a map would sort them.
+type jsonObject []jsonMember
+
+type jsonMember struct {
+	name  string
+	value any
+}
+
+func (o jsonObject) MarshalJSONTo(enc *jsontext.Encoder) error {
+	if err := enc.WriteToken(jsontext.BeginObject); err != nil {
+		return err
+	}
+	for _, m := range o {
+		if err := enc.WriteToken(jsontext.String(m.name)); err != nil {
+			return err
+		}
+		if err := json.MarshalEncode(enc, m.value); err != nil {
+			return err
+		}
+	}
+	return enc.WriteToken(jsontext.EndObject)
 }
 
 // ValidateOutput rejects incomplete, refused, or schema-invalid answers. Only
@@ -99,7 +135,7 @@ func ValidateOutput(msg AssistantMessage, schema *Schema) error {
 }
 
 func validatedOutput(msg AssistantMessage, schema *Schema) (any, error) {
-	if _, err := outputSchema(schema, false); err != nil {
+	if _, err := outputSchema(schema, ""); err != nil {
 		return nil, err
 	}
 	if msg.StopReason != StopReasonEnd {
@@ -151,8 +187,8 @@ func validateOutputValue(value any, schema *Schema, path string, optional bool) 
 			}
 		}
 		for name, v := range object {
-			property, ok := schema.Properties[name]
-			if !ok {
+			property := schema.Properties.Get(name)
+			if property == nil {
 				return fmt.Errorf("llm: structured output %s.%s is unknown", path, name)
 			}
 			if err := validateOutputValue(v, property, path+"."+name, !slices.Contains(schema.Required, name)); err != nil {
@@ -263,7 +299,7 @@ func normalizeOutputIntegers(value any, schema *Schema) (any, error) {
 	case "object":
 		object := value.(map[string]any)
 		for key, v := range object {
-			normalized, err := normalizeOutputIntegers(v, schema.Properties[key])
+			normalized, err := normalizeOutputIntegers(v, schema.Properties.Get(key))
 			if err != nil {
 				return nil, err
 			}
