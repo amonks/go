@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -366,6 +367,60 @@ func (c *Client) WorkspaceUpdateStale(workspacePath string) error {
 	cmd := exec.Command("jj", "workspace", "update-stale")
 	cmd.Dir = workspacePath
 	return runCombinedOutput(cmd, "jj workspace update-stale")
+}
+
+// RecoverStaleWorkingCopy updates a stale working copy and gives the work it
+// preserves a name.
+//
+// update-stale replaces what is on disk, but it does not lose it: it snapshots
+// the disk into a divergent commit under the workspace change's own id, then
+// checks out the rewritten commit. Ignored files are in no tree, so the
+// checkout leaves them where they are. When the disk held nothing jj had not
+// already seen — the common case, since staleness lands in bulk on idle
+// workspaces — no commit is made.
+//
+// When it did, that commit is the only record of the work, and left alone it
+// is an undescribed head under a change id that now has two commits, which no
+// one would recognize as their own last writes. A non-empty, undescribed
+// commit the recovery created is described as recoveredDescription.
+//
+// Only a commit this recovery created is named, which is why the change's
+// commits are read before update-stale as well as after. A change can be
+// divergent for reasons of its own — two concurrent operations elsewhere
+// rewriting it — and describing one of those would put this workspace's name
+// on an unrelated commit; DescribeAt also rewrites what it describes and
+// rebases its descendants, so a repair for one stale workspace could stale
+// another. A commit that already carries a description is the session's own
+// change, rewritten rather than recovered, and keeps its author's words.
+//
+// Naming is best-effort: it runs inside a recovery the caller did not ask
+// for, and failing to label the commit is no reason to fail the recovery that
+// saved it. The returned error is update-stale's alone.
+func (c *Client) RecoverStaleWorkingCopy(workspacePath, recoveredDescription string) error {
+	before, beforeErr := c.WorkingCopyChangeCommitIDs(workspacePath)
+	if err := c.WorkspaceUpdateStale(workspacePath); err != nil {
+		return err
+	}
+	if beforeErr != nil {
+		return nil
+	}
+	after, err := c.WorkingCopyChangeCommitIDs(workspacePath)
+	if err != nil {
+		return nil
+	}
+	for _, commit := range after {
+		if slices.Contains(before, commit) {
+			continue
+		}
+		if empty, err := c.ChangeEmptyAt(workspacePath, commit); err != nil || empty {
+			continue
+		}
+		if desc, err := c.DescriptionAt(workspacePath, commit); err != nil || strings.TrimSpace(desc) != "" {
+			continue
+		}
+		_ = c.DescribeAt(workspacePath, commit, recoveredDescription)
+	}
+	return nil
 }
 
 // WorkspaceForget removes a workspace from the repository without deleting it from disk.

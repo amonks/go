@@ -950,3 +950,94 @@ func TestRepoDir_NotARepo(t *testing.T) {
 		t.Error("expected error for non-repo directory")
 	}
 }
+
+// staleFixture is divergenceFixture's workspace gone stale with work on its
+// disk jj has not seen: an ignored file of the kind a pool's on-create hook
+// writes, and an edit made after the last snapshot, under a rewrite elsewhere
+// that changed the tree the workspace's change sits on.
+func staleFixture(t *testing.T) (repoPath, wsPath, changeID string, client *jj.Client) {
+	t.Helper()
+	repoPath, wsPath, client = divergenceFixture(t)
+	if err := os.WriteFile(filepath.Join(wsPath, ".gitignore"), []byte("*.local\n"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := client.Snapshot(wsPath); err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	changeID, err := client.ChangeIDAt(wsPath, "@")
+	if err != nil {
+		t.Fatalf("change id: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wsPath, ".envrc.local"), []byte("export SECRET=1\n"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wsPath, "late.txt"), []byte("written after the last snapshot\n"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	// wsA's change sits on root; moving it onto main changes its tree.
+	runRawJJ(t, repoPath, "rebase", "-r", "wsA@", "-d", "main")
+	if _, err := client.CurrentChangeID(wsPath); !jj.IsStaleWorkingCopy(err) {
+		t.Fatalf("expected the workspace to be stale, got %v", err)
+	}
+	return repoPath, wsPath, changeID, client
+}
+
+// The recovery leaves the workspace usable and keeps what was on its disk: the
+// edit jj never saw goes into a commit under the change's own id, named so it
+// reads as recovered work rather than junk, and the ignored files beside it
+// stay where they were.
+func TestRecoverStaleWorkingCopy_KeepsAndNamesTheWork(t *testing.T) {
+	repoPath, wsPath, changeID, client := staleFixture(t)
+
+	if err := client.RecoverStaleWorkingCopy(wsPath, "recovered from wsA"); err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+	if _, err := client.CurrentChangeID(wsPath); err != nil {
+		t.Fatalf("workspace still unusable after recovery: %v", err)
+	}
+	if b, err := os.ReadFile(filepath.Join(wsPath, ".envrc.local")); err != nil || string(b) != "export SECRET=1\n" {
+		t.Errorf("ignored file after recovery = %q, %v; want it untouched", b, err)
+	}
+
+	commits, err := client.CommitIDsForRevset(repoPath, "change_id("+changeID+")")
+	if err != nil {
+		t.Fatalf("list commits: %v", err)
+	}
+	var found string
+	for _, c := range commits {
+		if _, err := client.FileShow(repoPath, c, "late.txt"); err == nil {
+			found = c
+		}
+	}
+	if found == "" {
+		t.Fatalf("no commit under %s holds the unsnapshotted edit; commits: %v", changeID, commits)
+	}
+	if desc, err := client.DescriptionAt(repoPath, found); err != nil || strings.TrimSpace(desc) != "recovered from wsA" {
+		t.Errorf("recovered work described as %q, %v; want the caller's description", desc, err)
+	}
+}
+
+// A workspace whose disk matches what jj last saw has nothing to recover: the
+// recovery moves it along and creates nothing under its change.
+func TestRecoverStaleWorkingCopy_NothingToRecover(t *testing.T) {
+	repoPath, wsPath, client := divergenceFixture(t)
+	changeID, err := client.ChangeIDAt(wsPath, "@")
+	if err != nil {
+		t.Fatalf("change id: %v", err)
+	}
+	runRawJJ(t, repoPath, "rebase", "-r", "wsA@", "-d", "main")
+	if _, err := client.CurrentChangeID(wsPath); !jj.IsStaleWorkingCopy(err) {
+		t.Fatalf("expected the workspace to be stale, got %v", err)
+	}
+
+	if err := client.RecoverStaleWorkingCopy(wsPath, "recovered from wsA"); err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+	commits, err := client.CommitIDsForRevset(repoPath, "change_id("+changeID+")")
+	if err != nil {
+		t.Fatalf("list commits: %v", err)
+	}
+	if len(commits) != 1 {
+		t.Errorf("commits under the recovered change = %v, want just the rewritten one", commits)
+	}
+}
