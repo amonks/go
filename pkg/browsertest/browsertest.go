@@ -3,6 +3,17 @@
 // CI builder can meet, putting the page's own console in the test log,
 // and shutting it down before retrying transient profile cleanup failures.
 //
+// NewBrowser's browser reaches no host but localhost, 127.0.0.1 and ::1,
+// so a suite cannot reach the live fleet: a page it serves may link to
+// production, post to it, or be shown at a production URL by
+// interception, and the requests that follow fail in the browser
+// (net::ERR_NAME_NOT_RESOLVED) instead of arriving there. Every other
+// name and address is refused alike — a *.localhost name, 127.0.0.2, a
+// tailnet peer's address — so a suite serves from 127.0.0.1 or ::1. A
+// test that needs a request to a real origin answered answers it itself,
+// through CDP's Fetch domain. A suite that builds its own allocator gets
+// none of this.
+//
 // A suite's whole use of it is usually two calls:
 //
 //	ctx := browsertest.NewBrowser(t)
@@ -117,6 +128,17 @@ const (
 	launchTimeout = 2 * time.Minute
 	dialTimeout   = time.Minute
 )
+
+// loopbackOnly is the browser's host-resolver-rules: every host but
+// these three fails to resolve, an address as much as a name. A suite serves its pages from loopback,
+// and those pages name the live fleet — links to other apps, forms
+// posting to them, and the favicon Chrome fetches from any origin a
+// test steered it to by interception — so a browser that resolved them
+// sent each from the test machine to production. Requests a test
+// answers through CDP (Fetch.fulfillRequest) or merely observes
+// (Network.requestWillBeSent) never reach the resolver, so both still
+// work; the request fails here instead of arriving there.
+const loopbackOnly = "MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1, EXCLUDE ::1"
 
 // Option adjusts a browser NewBrowser is about to launch.
 type Option func(*options)
@@ -328,6 +350,7 @@ func newBrowser(t *testing.T, cleanup func(func()), opts ...Option) (context.Con
 		chromedp.Flag("hide-scrollbars", !cfg.scrollbars),
 		chromedp.Flag("disable-gpu", true),
 		chromedp.Flag("no-sandbox", true),
+		chromedp.Flag("host-resolver-rules", loopbackOnly),
 		chromedp.WSURLReadTimeout(launchTimeout),
 	)
 	if cfg.webgl {

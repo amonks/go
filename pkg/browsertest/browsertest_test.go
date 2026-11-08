@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -197,6 +198,50 @@ func TestNewBrowserDrivesAPage(t *testing.T) {
 	}
 	if greeting != "hello" {
 		t.Errorf("greeting = %q, want %q", greeting, "hello")
+	}
+}
+
+// TestNewBrowserResolvesOnlyLoopback keeps a suite off the live fleet.
+// A page a test serves names production URLs — a link it follows, a
+// form's action, the favicon Chrome asks of an origin it was steered to
+// by interception — and a browser that resolved them sent those
+// requests from the test machine to the real site. Loopback, by
+// address or by name, is where every suite's server listens, and the
+// one place it may reach.
+func TestNewBrowserResolvesOnlyLoopback(t *testing.T) {
+	page := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `<!doctype html><title>t</title><p id=greeting>hello</p>`)
+	})
+	server := httptest.NewServer(page)
+	defer server.Close()
+	_, port, _ := strings.Cut(strings.TrimPrefix(server.URL, "http://"), ":")
+	origins := []string{server.URL, "http://localhost:" + port}
+	if l, err := net.Listen("tcp6", "[::1]:0"); err == nil {
+		v6 := &httptest.Server{Listener: l, Config: &http.Server{Handler: page}}
+		v6.Start()
+		defer v6.Close()
+		origins = append(origins, v6.URL)
+	} else {
+		t.Logf("no IPv6 loopback to check: %v", err)
+	}
+
+	ctx := NewBrowser(t)
+	for _, origin := range origins {
+		var greeting string
+		if err := chromedp.Run(ctx,
+			Step("open "+origin, chromedp.Navigate(origin)),
+			Step("read the greeting", chromedp.Text("#greeting", &greeting, chromedp.ByQuery)),
+		); err != nil {
+			t.Fatalf("loopback at %s: %v", origin, err)
+		}
+	}
+	// An address is the other way a page names a host: a tailnet peer's,
+	// say. The rule maps it to nothing as it does a name.
+	for _, public := range []string{"https://example.com/", "https://www.example.com/favicon.ico", "http://192.0.2.1/", "http://127.0.0.2:" + port + "/"} {
+		err := chromedp.Run(ctx, Step("open "+public, chromedp.Navigate(public)))
+		if err == nil || !strings.Contains(err.Error(), "ERR_NAME_NOT_RESOLVED") {
+			t.Errorf("navigating to %s: %v, want net::ERR_NAME_NOT_RESOLVED", public, err)
+		}
 	}
 }
 
