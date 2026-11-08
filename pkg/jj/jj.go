@@ -291,6 +291,27 @@ func (c *Client) CommitIDAt(workspacePath, rev string) (string, error) {
 	return logFieldAt(workspacePath, rev, "commit_id")
 }
 
+// ResolveCommitID returns the one commit revset names, read without
+// touching the working copy (--ignore-working-copy): no snapshot is
+// taken, so it costs a fraction of an ordinary jj command — the snapshot
+// is most of what those cost in a big checkout — and it can run in a
+// checkout someone is editing without folding their edits into @. The
+// answer is the repo as of its last operation, so @ there means the
+// working copy as jj last saw it.
+//
+// The revset is wrapped in exactly(…, 1): one naming several commits or
+// none is an error, where the bare template would print their ids run
+// together, or nothing. A caller pinning work to the answer needs one.
+func (c *Client) ResolveCommitID(path, revset string) (string, error) {
+	if strings.TrimSpace(revset) == "" {
+		return "", fmt.Errorf("revset is required")
+	}
+	cmd := exec.Command("jj", "--ignore-working-copy", "log", "--no-graph",
+		"-r", "exactly("+revset+", 1)", "-T", "commit_id")
+	cmd.Dir = path
+	return commandOutputString(cmd, "jj log commit id")
+}
+
 // DiffStat returns the diff stat between two revisions.
 func (c *Client) DiffStat(workspacePath, from, to string) (string, error) {
 	cmd := exec.Command("jj", "diff", "--from", from, "--to", to, "--stat")
@@ -566,4 +587,19 @@ func (c *Client) RepoDir(workspacePath string) (string, error) {
 		path = filepath.Join(filepath.Dir(repo), path)
 	}
 	return filepath.Clean(path), nil
+}
+
+// OpHeadsDir returns the directory holding the repo's operation heads,
+// in the store RepoDir finds. Every operation on the repo, from any of
+// its workspaces, replaces the heads — the new operation's file goes
+// in, the old one's comes out — so the directory's modification time
+// changes with each one. A caller watching for the repo to move (a
+// fetch moving trunk(), a rebase) can stat it on a short interval for
+// nearly nothing and run jj only when it changes.
+func (c *Client) OpHeadsDir(workspacePath string) (string, error) {
+	repo, err := c.RepoDir(workspacePath)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(repo, "op_heads", "heads"), nil
 }

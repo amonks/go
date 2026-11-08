@@ -1041,3 +1041,108 @@ func TestRecoverStaleWorkingCopy_NothingToRecover(t *testing.T) {
 		t.Errorf("commits under the recovered change = %v, want just the rewritten one", commits)
 	}
 }
+
+// ResolveCommitID reads the repo as of its last operation and leaves the
+// working copy alone: an edit on disk that jj has not seen stays unseen,
+// where an ordinary jj command would have snapshotted it into @ first.
+// That is what makes it cheap enough to poll, and safe to run in a
+// checkout someone is editing.
+func TestResolveCommitID_DoesNotSnapshot(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+	client := jj.New()
+	if err := client.Init(tmpDir); err != nil {
+		t.Fatalf("failed to init jj repo: %v", err)
+	}
+	before, err := client.ResolveCommitID(tmpDir, "@")
+	if err != nil {
+		t.Fatalf("resolve @: %v", err)
+	}
+	if len(before) != 40 {
+		t.Fatalf("resolved %q, want a full commit id", before)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "unseen.txt"), []byte("not yet snapshotted\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if again, err := client.ResolveCommitID(tmpDir, "@"); err != nil {
+		t.Fatalf("resolve @ again: %v", err)
+	} else if again != before {
+		t.Errorf("resolve after an edit = %s, want %s: it snapshotted the working copy", again, before)
+	}
+	// An ordinary command does snapshot, which is how the test knows the
+	// edit was there to see.
+	if after, err := client.CurrentCommitID(tmpDir); err != nil {
+		t.Fatal(err)
+	} else if after == before {
+		t.Fatal("the edit never changed @; the test proves nothing")
+	}
+}
+
+// A revset that names several commits, or none, is an error rather than
+// whatever the template would print for it — concatenated ids, or
+// nothing — since a caller pinning work to the answer needs exactly one.
+func TestResolveCommitID_RequiresExactlyOne(t *testing.T) {
+	tmpDir := t.TempDir()
+	client := jj.New()
+	if err := client.Init(tmpDir); err != nil {
+		t.Fatalf("failed to init jj repo: %v", err)
+	}
+	if _, err := client.NewChange(tmpDir, "@"); err != nil {
+		t.Fatal(err)
+	}
+	for _, revset := range []string{"all()", "none()", ""} {
+		if id, err := client.ResolveCommitID(tmpDir, revset); err == nil {
+			t.Errorf("resolve %q = %q, want an error", revset, id)
+		}
+	}
+	if _, err := client.ResolveCommitID(tmpDir, "@-"); err != nil {
+		t.Errorf("resolve @-: %v", err)
+	}
+}
+
+// Every operation on a repo replaces its op heads, so the directory
+// holding them changes with each one — from any of the repo's
+// workspaces, since they share the one op log.
+func TestOpHeadsDir_ChangesWithEveryOperation(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+	client := jj.New()
+	if err := client.Init(tmpDir); err != nil {
+		t.Fatalf("failed to init jj repo: %v", err)
+	}
+	wsPath := filepath.Join(tmpDir, "workspaces", "ws-001")
+	if err := os.MkdirAll(filepath.Dir(wsPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.WorkspaceAdd(tmpDir, "ws-001", wsPath); err != nil {
+		t.Fatalf("failed to add workspace: %v", err)
+	}
+
+	heads, err := client.OpHeadsDir(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(tmpDir, ".jj", "repo", "op_heads", "heads"); heads != want {
+		t.Errorf("op heads = %q, want %q", heads, want)
+	}
+	if secondary, err := client.OpHeadsDir(wsPath); err != nil {
+		t.Fatal(err)
+	} else if secondary != heads {
+		t.Errorf("secondary workspace's op heads = %q, want the repo's %q", secondary, heads)
+	}
+
+	before, err := os.Stat(heads)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Describe(wsPath, "an operation from the other workspace"); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(heads)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.ModTime().Equal(before.ModTime()) {
+		t.Errorf("op heads mtime unchanged across an operation (%v)", after.ModTime())
+	}
+}
