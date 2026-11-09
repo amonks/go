@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"io/fs"
+	"path"
 	"sort"
 	"strings"
 	"time"
@@ -13,7 +14,7 @@ import (
 type Config struct {
 	DB       *sql.DB
 	FS       fs.FS
-	Dir      string   // directory within FS, e.g. "migrations"
+	Dir      string   // directory within FS, e.g. "migrations"; "." for its root
 	Baseline []string // filenames to record-but-not-execute on existing databases
 }
 
@@ -89,7 +90,7 @@ func loadMigrationFiles(fsys fs.FS, dir string) ([]migrationFile, error) {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".sql") {
 			continue
 		}
-		data, err := fs.ReadFile(fsys, dir+"/"+e.Name())
+		data, err := fs.ReadFile(fsys, path.Join(dir, e.Name()))
 		if err != nil {
 			return nil, err
 		}

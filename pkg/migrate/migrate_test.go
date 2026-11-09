@@ -32,8 +32,8 @@ func makeFS(files map[string]string) fs.FS {
 func TestFreshDatabase(t *testing.T) {
 	db := openTestDB(t)
 	migrations := makeFS(map[string]string{
-		"migrations/001_create_users.sql":  "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);",
-		"migrations/002_create_posts.sql":  "CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER, body TEXT);",
+		"migrations/001_create_users.sql": "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);",
+		"migrations/002_create_posts.sql": "CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER, body TEXT);",
 	})
 
 	err := migrate.Run(context.Background(), migrate.Config{
@@ -50,6 +50,30 @@ func TestFreshDatabase(t *testing.T) {
 	}
 	if err := db.QueryRow("SELECT count(*) FROM posts").Scan(&count); err != nil {
 		t.Fatal("posts table should exist:", err)
+	}
+}
+
+// A package that embeds its own directory's migrations (//go:embed
+// *.sql) holds them at the root of its FS, which io/fs names ".".
+func TestMigrationsAtRoot(t *testing.T) {
+	db := openTestDB(t)
+	migrations := makeFS(map[string]string{
+		"001_create_users.sql": "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);",
+	})
+
+	err := migrate.Run(context.Background(), migrate.Config{
+		DB: db, FS: migrations, Dir: ".",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var name string
+	if err := db.QueryRow("SELECT migration_filename FROM applied_migrations").Scan(&name); err != nil {
+		t.Fatal(err)
+	}
+	if name != "001_create_users.sql" {
+		t.Errorf("recorded %q, want the file's name alone", name)
 	}
 }
 
