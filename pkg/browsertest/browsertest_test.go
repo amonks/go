@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/chromedp/chromedp"
+	"github.com/chromedp/chromedp/device"
 )
 
 // TestStepNamesAStalledWait is the reason Step exists: an action that
@@ -242,6 +243,45 @@ func TestNewBrowserResolvesOnlyLoopback(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "ERR_NAME_NOT_RESOLVED") {
 			t.Errorf("navigating to %s: %v, want net::ERR_NAME_NOT_RESOLVED", public, err)
 		}
+	}
+}
+
+// TestNewBrowserHoversWithAFinePointer keeps a suite's desktop the same
+// on every host. Chrome reads hover and pointer from the machine's input
+// devices, so on a laptop a headless page matches (hover: hover) and on a
+// builder with no mouse it matches (hover: none) — and a test written
+// against one reads the other's screen: a desktop's gestures asserted on
+// brigid fail on the builder. Every browser is a desktop with a mouse,
+// an emulated phone still turns it into a touch screen, and leaving the
+// phone for a desktop viewport is a desktop again once a page loads.
+// On a host with a mouse this passes without the launch setting; on the
+// builder it is the regression test.
+func TestNewBrowserHoversWithAFinePointer(t *testing.T) {
+	const pointer = `["(hover: hover)", "(hover: none)", "(pointer: fine)", "(pointer: coarse)", "(any-hover: hover)", "(any-pointer: fine)"]
+		.filter(q => matchMedia(q).matches)`
+	ctx := NewBrowser(t)
+	var desktop, phone, again []string
+	if err := chromedp.Run(ctx,
+		Step("open a page", chromedp.Navigate("about:blank")),
+		chromedp.Evaluate(pointer, &desktop),
+		chromedp.Emulate(device.IPhone13),
+		Step("open it on a phone", chromedp.Navigate("about:blank")),
+		chromedp.Evaluate(pointer, &phone),
+		chromedp.EmulateViewport(1200, 900),
+		Step("open it on a desktop again", chromedp.Navigate("about:blank")),
+		chromedp.Evaluate(pointer, &again),
+	); err != nil {
+		t.Fatal(err)
+	}
+	mouse := []string{"(hover: hover)", "(pointer: fine)", "(any-hover: hover)", "(any-pointer: fine)"}
+	if !slices.Equal(desktop, mouse) {
+		t.Errorf("the desktop matches %q, want %q", desktop, mouse)
+	}
+	if want := []string{"(hover: none)", "(pointer: coarse)"}; !slices.Equal(phone, want) {
+		t.Errorf("the emulated phone matches %q, want %q", phone, want)
+	}
+	if !slices.Equal(again, mouse) {
+		t.Errorf("the desktop after the phone matches %q, want %q", again, mouse)
 	}
 }
 

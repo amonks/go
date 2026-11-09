@@ -140,6 +140,22 @@ const (
 // work; the request fails here instead of arriving there.
 const loopbackOnly = "MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1, EXCLUDE ::1"
 
+// desktopPointer is the browser's blink-settings: a primary pointer that
+// is fine and hovers, and nothing coarser available — a desktop with a
+// mouse, whatever the machine has. Chrome otherwise reads hover and
+// pointer from the host's input devices, so a page matched (hover: hover)
+// on a laptop and (hover: none) on a builder with no mouse, and a suite
+// asserting a desktop's gestures passed on one and failed on the other.
+// Device emulation (chromedp.Emulate) still makes a phone a touch screen:
+// touch emulation sets its own pointer over these. The settings apply as
+// each page loads, and no more: touch emulation keeps its own copy of the
+// host's pointer, so turning it off on a loaded page — every
+// chromedp.EmulateViewport call does — brings the host's back until the
+// next navigation. A test asserting a desktop's hover after a resize or a
+// phone navigates after it. The numbers are Blink's: a fine pointer is 4,
+// a hovering one 2.
+const desktopPointer = "primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4"
+
 // Option adjusts a browser NewBrowser is about to launch.
 type Option func(*options)
 
@@ -351,6 +367,7 @@ func newBrowser(t *testing.T, cleanup func(func()), opts ...Option) (context.Con
 		chromedp.Flag("disable-gpu", true),
 		chromedp.Flag("no-sandbox", true),
 		chromedp.Flag("host-resolver-rules", loopbackOnly),
+		chromedp.Flag("blink-settings", desktopPointer),
 		chromedp.WSURLReadTimeout(launchTimeout),
 	)
 	if cfg.webgl {
