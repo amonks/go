@@ -5,6 +5,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -169,6 +170,50 @@ func TestResponsesLocalValidationIsNotRetryable(t *testing.T) {
 	}
 	if _, err := convertToResponsesRequest(Model{ID: "unsupported"}, Request{ToolChoice: "answer"}, StreamOptions{}); err == nil {
 		t.Fatal("unknown forced-tool capability accepted")
+	}
+}
+
+// GPT-6.1 Sol always reasons, like Astra; Terra takes none through max.
+// https://developers.openai.com/api/docs/models/gpt-6.1-sol
+// https://developers.openai.com/api/docs/models/gpt-6.1-terra
+func TestResponsesGPT61SolAndTerra(t *testing.T) {
+	for _, tc := range []struct {
+		id      string
+		offOK   bool
+		efforts []ThinkingLevel
+	}{
+		{"gpt-6.1-sol", false, []ThinkingLevel{ThinkingLow, ThinkingMedium, ThinkingHigh, ThinkingXHigh, ThinkingMax}},
+		{"gpt-6.1-terra", true, []ThinkingLevel{ThinkingOff, ThinkingLow, ThinkingMedium, ThinkingHigh, ThinkingXHigh, ThinkingMax}},
+	} {
+		t.Run(tc.id, func(t *testing.T) {
+			model := Model{ID: tc.id, API: APIOpenAIResponses}
+			if got, want := model.ThinkingLevels(), append([]ThinkingLevel{""}, tc.efforts...); !slices.Equal(got, want) {
+				t.Errorf("levels = %v, want %v", got, want)
+			}
+			for _, level := range tc.efforts {
+				req, err := convertToResponsesRequest(model, Request{}, StreamOptions{ThinkingLevel: level})
+				if err != nil {
+					t.Errorf("%s: %v", level, err)
+					continue
+				}
+				want := string(level)
+				if level == ThinkingOff {
+					want = "none"
+				}
+				if req.Reasoning == nil || req.Reasoning.Effort != want {
+					t.Errorf("%s: reasoning = %+v, want %s", level, req.Reasoning, want)
+				}
+			}
+			if model.SupportsThinkingLevel(ThinkingOff) != tc.offOK {
+				t.Errorf("off supported = %v, want %v", !tc.offOK, tc.offOK)
+			}
+			if !model.SupportsStructuredOutput() || !model.SupportsToolChoice() {
+				t.Error("missing documented structured output or tool choice")
+			}
+			if !(Model{ID: tc.id, API: APIOpenAICompletions}).SupportsStructuredOutput() {
+				t.Error("completions structured output missing")
+			}
+		})
 	}
 }
 
