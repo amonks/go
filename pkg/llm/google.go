@@ -194,9 +194,6 @@ func convertToGoogleRequest(model Model, req Request, opts StreamOptions) (googl
 		out.SystemInstruction.Parts = append(out.SystemInstruction.Parts, googlePart{Text: new(system.Text)})
 	}
 	if req.OutputSchema != nil {
-		if googleBudgetModel(model.ID) && len(req.Tools) > 0 {
-			return out, fmt.Errorf("google model %s cannot combine tools and structured output", model.ID)
-		}
 		schema, err := structuredRequestSchema(model, req.OutputSchema)
 		if err != nil {
 			return out, err
@@ -270,7 +267,6 @@ func convertToGoogleRequest(model Model, req Request, opts StreamOptions) (googl
 				return out, err
 			}
 			var parts []any
-			var images []any
 			for _, msg := range batch {
 				call := calls[msg.ToolCallID]
 				response := googleFunctionResponse{ID: call.ID, Name: call.Name, Response: map[string]any{}}
@@ -280,12 +276,7 @@ func convertToGoogleRequest(model Model, req Request, opts StreamOptions) (googl
 					case TextContent:
 						texts = append(texts, block.Text)
 					case ImageContent:
-						part := googlePart{InlineData: &googleBlob{MimeType: block.MimeType, Data: block.Data}}
-						if googleBudgetModel(model.ID) {
-							images = append(images, googlePart{Text: new(fmt.Sprintf("Image from tool %s (call %s):", call.Name, msg.ToolCallID))}, part)
-						} else {
-							response.Parts = append(response.Parts, part)
-						}
+						response.Parts = append(response.Parts, googlePart{InlineData: &googleBlob{MimeType: block.MimeType, Data: block.Data}})
 					}
 				}
 				key := "output"
@@ -295,9 +286,6 @@ func convertToGoogleRequest(model Model, req Request, opts StreamOptions) (googl
 				response.Response[key] = strings.Join(texts, "\n")
 				parts = append(parts, googlePart{FunctionResponse: &response})
 			}
-			// Gemini 2.5 predates multimodal functionResponse.parts. Its image
-			// inputs follow the complete run of function results in the same turn.
-			parts = append(parts, images...)
 			out.Contents = append(out.Contents, googleContent{Role: "user", Parts: parts})
 			calls, callOrder = nil, nil
 		}
@@ -433,9 +421,7 @@ func googleAssistantParts(model Model, msg AssistantMessage, calls map[string]go
 			part := googlePart{FunctionCall: &call}
 			// Google's documented escape hatch for transferring another model's
 			// tool history. Never substitute this for matching signed state.
-			if !googleBudgetModel(model.ID) {
-				part.ThoughtSignature = "skip_thought_signature_validator"
-			}
+			part.ThoughtSignature = "skip_thought_signature_validator"
 			parts = append(parts, part)
 			calls[block.ID] = call
 		}

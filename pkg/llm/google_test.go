@@ -79,14 +79,10 @@ func TestGoogleCapabilities(t *testing.T) {
 		id     string
 		levels []ThinkingLevel
 	}{
-		{"gemini-2.5-pro", []ThinkingLevel{"", ThinkingMinimal, ThinkingLow, ThinkingMedium, ThinkingHigh}},
-		{"gemini-2.5-flash", []ThinkingLevel{"", ThinkingOff, ThinkingMinimal, ThinkingLow, ThinkingMedium, ThinkingHigh}},
-		{"gemini-2.5-flash-lite", []ThinkingLevel{"", ThinkingOff, ThinkingMinimal, ThinkingLow, ThinkingMedium, ThinkingHigh}},
 		{"gemini-3-flash-preview", []ThinkingLevel{"", ThinkingMinimal, ThinkingLow, ThinkingMedium, ThinkingHigh}},
 		{"gemini-3.1-pro-preview", []ThinkingLevel{"", ThinkingLow, ThinkingMedium, ThinkingHigh}},
 		{"gemini-3.1-pro-preview-customtools", []ThinkingLevel{"", ThinkingLow, ThinkingMedium, ThinkingHigh}},
 		{"gemini-3.1-flash-lite", []ThinkingLevel{"", ThinkingMinimal, ThinkingLow, ThinkingMedium, ThinkingHigh}},
-		{"gemini-3.1-flash-lite-preview", []ThinkingLevel{"", ThinkingMinimal, ThinkingLow, ThinkingMedium, ThinkingHigh}},
 		{"gemini-3.5-flash", []ThinkingLevel{"", ThinkingMinimal, ThinkingLow, ThinkingMedium, ThinkingHigh}},
 		{"gemini-3.5-flash-lite", []ThinkingLevel{"", ThinkingMinimal, ThinkingLow, ThinkingMedium, ThinkingHigh}},
 		{"gemini-3.6-flash", []ThinkingLevel{"", ThinkingMinimal, ThinkingLow, ThinkingMedium, ThinkingHigh}},
@@ -110,7 +106,12 @@ func TestGoogleCapabilities(t *testing.T) {
 			}
 		})
 	}
-	for _, id := range []string{"gemini-unknown", "gemini-3.8-flash-image", "gemini-4-argon-next"} {
+	// Every 2.5 model is closed to keys that never used it (ours answers
+	// 404, "no longer available to new users"), and 2.5 Pro and Flash
+	// route to Gemini 3 models, which take thinking levels in place of
+	// budgets, from 2026-12-01; 3.1 Flash-Lite Preview shut down on
+	// 2026-05-25. None promises anything any more.
+	for _, id := range []string{"gemini-unknown", "gemini-3.8-flash-image", "gemini-4-argon-next", "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-3.1-flash-lite-preview"} {
 		m := googleTestModel()
 		m.ID = id
 		if m.SupportsStructuredOutput() || m.SupportsToolChoice() || m.SupportsThinkingLevel(ThinkingLow) {
@@ -123,17 +124,8 @@ func TestGoogleCapabilities(t *testing.T) {
 			t.Fatalf("accepted unsupported %q", level)
 		}
 	}
-	m.ID = "gemini-2.5-flash"
-	req, err := convertToGoogleRequest(m, Request{}, StreamOptions{ThinkingLevel: ThinkingOff})
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, _ := json.Marshal(req, json.Deterministic(true))
-	if !strings.Contains(string(b), `"thinkingBudget":0`) {
-		t.Fatalf("off omitted: %s", b)
-	}
-	if _, err := convertToGoogleRequest(m, Request{Tools: []Tool{{Name: "lookup"}}, OutputSchema: GenerateSchema(struct{ Answer string }{})}, StreamOptions{}); err == nil {
-		t.Fatal("2.5 cannot combine tools and output schema")
+	if _, err := convertToGoogleRequest(m, Request{Tools: []Tool{{Name: "lookup"}}, OutputSchema: GenerateSchema(struct{ Answer string }{})}, StreamOptions{}); err != nil {
+		t.Fatalf("tools beside an output schema: %v", err)
 	}
 }
 
@@ -372,32 +364,6 @@ func TestGoogleTransferToolHistory(t *testing.T) {
 	}
 }
 
-func TestGoogle25ToolImagesFollowAllResults(t *testing.T) {
-	m := googleTestModel()
-	m.ID = "gemini-2.5-flash"
-	req, err := convertToGoogleRequest(m, Request{Messages: []Message{
-		AssistantMessage{Content: []ContentBlock{ToolCall{ID: "1", Name: "look"}, ToolCall{ID: "2", Name: "look"}}},
-		ToolResultMessage{ToolCallID: "1", Content: []ContentBlock{ImageContent{MimeType: "image/png", Data: "b25l"}}},
-		ToolResultMessage{ToolCallID: "2", Content: []ContentBlock{ImageContent{MimeType: "image/png", Data: "dHdv"}}},
-	}}, StreamOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, _ := json.Marshal(req, json.Deterministic(true))
-	var wire struct {
-		Contents []struct {
-			Parts []map[string]any `json:"parts"`
-		} `json:"contents"`
-	}
-	if err := json.Unmarshal(b, &wire); err != nil {
-		t.Fatal(err)
-	}
-	parts := wire.Contents[1].Parts
-	if len(parts) != 6 || parts[0]["functionResponse"] == nil || parts[1]["functionResponse"] == nil || parts[3]["inlineData"] == nil || parts[5]["inlineData"] == nil {
-		t.Fatalf("request=%s", b)
-	}
-}
-
 func TestGoogleSSEFramingAndCancellation(t *testing.T) {
 	for _, data := range []string{
 		"data:{\"candidates\":[{\"finishReason\":\"STOP\"}]}",
@@ -472,14 +438,13 @@ func TestGoogleRejectsEditedSignedCalls(t *testing.T) {
 	}
 }
 
-func TestGoogleOutputLimitDoesNotChangeThinkingBudget(t *testing.T) {
+func TestGoogleOutputLimitDoesNotChangeThinkingLevel(t *testing.T) {
 	m := googleTestModel()
-	m.ID = "gemini-2.5-pro"
 	req, err := convertToGoogleRequest(m, Request{}, StreamOptions{ThinkingLevel: ThinkingHigh, MaxTokens: new(100)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if req.GenerationConfig.MaxOutputTokens != 100 || *req.GenerationConfig.ThinkingConfig.ThinkingBudget != 32768 {
+	if req.GenerationConfig.MaxOutputTokens != 100 || req.GenerationConfig.ThinkingConfig.ThinkingLevel != "HIGH" {
 		t.Fatalf("config=%+v", req.GenerationConfig)
 	}
 }
@@ -559,7 +524,7 @@ func googleWeatherCalls(t *testing.T, model Model, nativeIDs [2]string) (Assista
 }
 
 func TestGoogleReordersPositionalToolResultsWithTheirImages(t *testing.T) {
-	for _, modelID := range []string{"gemini-2.5-flash", "gemini-3.8-flash"} {
+	for _, modelID := range []string{"gemini-3.8-flash"} {
 		for _, ids := range [][2]string{{"", ""}, {"native-paris", "native-london"}, {"", "native-london"}, {"native-paris", ""}} {
 			t.Run(modelID+"/"+strings.Join(ids[:], "/"), func(t *testing.T) {
 				m := googleTestModel()
@@ -597,12 +562,7 @@ func TestGoogleReordersPositionalToolResultsWithTheirImages(t *testing.T) {
 					if response == nil || response.ID != ids[source] || response.Response["output"] != outputs[source] {
 						t.Fatalf("result %d lost call association: %s", position, wire)
 					}
-					if googleBudgetModel(modelID) {
-						label := parts[2+2*position].Text
-						if label == nil || !strings.Contains(*label, calls[source].ID) || parts[3+2*position].InlineData.Data != images[source] {
-							t.Fatalf("image %d lost call association: %s", position, wire)
-						}
-					} else if len(response.Parts) != 1 || response.Parts[0].InlineData.Data != images[source] {
+					if len(response.Parts) != 1 || response.Parts[0].InlineData.Data != images[source] {
 						t.Fatalf("image %d lost call association: %s", position, wire)
 					}
 				}
