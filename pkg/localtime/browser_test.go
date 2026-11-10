@@ -7,7 +7,6 @@ package localtime
 // draw their own.
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -19,27 +18,32 @@ import (
 	"github.com/chromedp/chromedp"
 
 	"monks.co/pkg/browsertest"
+	"monks.co/pkg/csp"
 )
 
 func TestBrowserRewritesStampsIntoTheViewersZone(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+		// Rendered outside serve.Mux, so the nonce the request carries
+		// (csp.NonceHeader) goes in templ's slot here, where the mux
+		// would have put it.
+		ctx := templ.WithNonce(r.Context(), r.Header.Get(csp.NonceHeader))
 		var b strings.Builder
 		b.WriteString(`<!doctype html><html><head>`)
-		if err := Script().Render(context.Background(), &b); err != nil {
+		if err := Script().Render(ctx, &b); err != nil {
 			t.Error(err)
 		}
 		b.WriteString(`</head><body>`)
 		b.WriteString(`<p id="minute">`)
-		Stamp(at, Minute).Render(context.Background(), &b)
+		Stamp(at, Minute).Render(ctx, &b)
 		b.WriteString(`</p><p id="second">`)
-		Stamp(at, Second).Render(context.Background(), &b)
+		Stamp(at, Second).Render(ctx, &b)
 		b.WriteString(`</p><p id="milli">`)
-		Stamp(at.Add(123*time.Millisecond), Milli).Render(context.Background(), &b)
+		Stamp(at.Add(123*time.Millisecond), Milli).Render(ctx, &b)
 		b.WriteString(`</p><p id="day">`)
-		Stamp(at, Day).Render(context.Background(), &b)
+		Stamp(at, Day).Render(ctx, &b)
 		b.WriteString(`</p><p id="titled">`)
-		Titled(at, Second).Render(templ.WithChildren(context.Background(), templ.Raw("3m ago")), &b)
+		Titled(at, Second).Render(templ.WithChildren(ctx, templ.Raw("3m ago")), &b)
 		b.WriteString(`</p><div id="late"></div></body></html>`)
 		w.Write([]byte(b.String()))
 	})

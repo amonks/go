@@ -26,6 +26,11 @@ import (
 	"monks.co/pkg/browsertest"
 )
 
+// fixtureCtx is what fixture pages render under: browsertest's
+// stand-in nonce in templ's nonce slot, which browsertest.Nonced swaps
+// for each request's.
+var fixtureCtx = templ.WithNonce(context.Background(), browsertest.FixtureNonce)
+
 type browserPerson struct {
 	ID     string
 	Name   string
@@ -130,16 +135,16 @@ func noScriptBrowserDocument(t *testing.T) string {
 	}
 	var out strings.Builder
 	out.WriteString(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>No-script datagrid</title>`)
-	if err := Head().Render(context.Background(), &out); err != nil {
+	if err := Head().Render(fixtureCtx, &out); err != nil {
 		t.Fatal(err)
 	}
 	out.WriteString(`</head><body>`)
-	if err := Table(options, nil).Render(context.Background(), &out); err != nil {
+	if err := Table(options, nil).Render(fixtureCtx, &out); err != nil {
 		t.Fatal(err)
 	}
 	options.ID = "populated-grid"
 	options.Caption = "Populated grid"
-	if err := Table(options, []string{"one row"}).Render(context.Background(), &out); err != nil {
+	if err := Table(options, []string{"one row"}).Render(fixtureCtx, &out); err != nil {
 		t.Fatal(err)
 	}
 	out.WriteString(`</body></html>`)
@@ -151,7 +156,7 @@ func browserDocument(t *testing.T) string {
 	rows := browserRows()
 	var out strings.Builder
 	out.WriteString(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>datagrid preview</title>`)
-	if err := Head().Render(context.Background(), &out); err != nil {
+	if err := Head().Render(fixtureCtx, &out); err != nil {
 		t.Fatal(err)
 	}
 	out.WriteString(`<style>
@@ -167,21 +172,21 @@ func browserDocument(t *testing.T) string {
 		@media (prefers-color-scheme:dark) { html { background:#0b1018; } body { color:#e7edf7; } .preview-lede,.preview-card h2 { color:#98a2b3; } }
 	</style></head><body><h1>Datagrid laboratory</h1><p class="preview-lede">The same component chooses its layout from its own width.</p><div class="preview-pair"><section class="preview-card"><h2>Wide allocation</h2>`)
 	extra := templ.Raw(`<button class="preview-extra" type="button">Export visible rows</button><table id="supplemental-table" hidden><tbody><tr><td>Supplemental content may contain its own table.</td></tr></tbody></table>`)
-	if err := Table(browserOptions("people"), rows).Render(templ.WithChildren(context.Background(), extra), &out); err != nil {
+	if err := Table(browserOptions("people"), rows).Render(templ.WithChildren(fixtureCtx, extra), &out); err != nil {
 		t.Fatal(err)
 	}
 	out.WriteString(`</section><section class="preview-card"><h2>Constrained allocation</h2>`)
 	compact := browserOptions("compact")
 	compact.PageSize = 10
 	compact.Columns = compact.Columns[:3]
-	if err := Table(compact, rows[:10]).Render(context.Background(), &out); err != nil {
+	if err := Table(compact, rows[:10]).Render(fixtureCtx, &out); err != nil {
 		t.Fatal(err)
 	}
 	out.WriteString(`</section></div><section class="preview-card preview-plain" style="max-width:920px;margin-top:28px"><h2>Enhancements disabled</h2>`)
 	plain := browserOptions("plain")
 	plain.Disabled = allFeatures
 	plain.Columns = plain.Columns[:3]
-	if err := Table(plain, rows[:3]).Render(context.Background(), &out); err != nil {
+	if err := Table(plain, rows[:3]).Render(fixtureCtx, &out); err != nil {
 		t.Fatal(err)
 	}
 	out.WriteString(`</section><section class="preview-card" style="max-width:920px;margin-top:28px"><h2>Default sort</h2>`)
@@ -190,14 +195,14 @@ func browserDocument(t *testing.T) string {
 	ranked.InitialState = State{Sort: "score", Descending: true}
 	rankedRows := slices.Clone(rows[:6])
 	slices.SortStableFunc(rankedRows, func(a, b browserPerson) int { return cmp.Compare(b.Score, a.Score) })
-	if err := Table(ranked, rankedRows).Render(context.Background(), &out); err != nil {
+	if err := Table(ranked, rankedRows).Render(fixtureCtx, &out); err != nil {
 		t.Fatal(err)
 	}
 	out.WriteString(`</section><section class="preview-card" style="max-width:920px;margin-top:28px"><h2>Default filter</h2>`)
 	scoped := browserOptions("scoped")
 	scoped.Columns = scoped.Columns[:2]
 	scoped.InitialState = State{Filters: map[string][]string{"team": {"Research"}}}
-	if err := Table(scoped, rows[:6]).Render(context.Background(), &out); err != nil {
+	if err := Table(scoped, rows[:6]).Render(fixtureCtx, &out); err != nil {
 		t.Fatal(err)
 	}
 	out.WriteString(`</section></body></html>`)
@@ -207,9 +212,9 @@ func browserDocument(t *testing.T) string {
 func browserServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	html := browserDocument(t)
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte(html))
+		_, _ = w.Write([]byte(browsertest.Nonced(r, html)))
 	}))
 }
 
@@ -532,21 +537,21 @@ func TestBrowserOpenFilterDropdownPaintsOverFollowingGrid(t *testing.T) {
 	rows := browserRows()
 	var out strings.Builder
 	out.WriteString(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>stacked grids</title>`)
-	if err := Head().Render(context.Background(), &out); err != nil {
+	if err := Head().Render(fixtureCtx, &out); err != nil {
 		t.Fatal(err)
 	}
 	out.WriteString(`<style>body { margin:0; padding:24px; max-width:920px; }</style></head><body>`)
-	if err := Table(browserOptions("upper"), rows).Render(context.Background(), &out); err != nil {
+	if err := Table(browserOptions("upper"), rows).Render(fixtureCtx, &out); err != nil {
 		t.Fatal(err)
 	}
-	if err := Table(browserOptions("lower"), rows).Render(context.Background(), &out); err != nil {
+	if err := Table(browserOptions("lower"), rows).Render(fixtureCtx, &out); err != nil {
 		t.Fatal(err)
 	}
 	out.WriteString(`</body></html>`)
 	html := out.String()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte(html))
+		_, _ = w.Write([]byte(browsertest.Nonced(r, html)))
 	}))
 	defer server.Close()
 
@@ -893,9 +898,9 @@ func TestBrowserTableUsesCompactMonospacedBackgroundlessStyling(t *testing.T) {
 }
 
 func TestBrowserCallerOwnedBodyRowHeaderCannotInventColumn(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = io.WriteString(w, callerOwnedBodyRowHeaderDocument(t))
+		_, _ = io.WriteString(w, browsertest.Nonced(r, callerOwnedBodyRowHeaderDocument(t)))
 	}))
 	defer server.Close()
 	ctx := browsertest.NewBrowser(t)
@@ -980,11 +985,11 @@ func callerOwnedBodyRowHeaderDocument(t *testing.T) string {
 
 	var out strings.Builder
 	out.WriteString(`<!doctype html><html><head><meta charset="utf-8">`)
-	if err := Head().Render(context.Background(), &out); err != nil {
+	if err := Head().Render(fixtureCtx, &out); err != nil {
 		t.Fatal(err)
 	}
 	out.WriteString(`</head><body>`)
-	ctx := templ.WithChildren(context.Background(), table)
+	ctx := templ.WithChildren(fixtureCtx, table)
 	if err := Shell(ShellProps{
 		ID:          "caller-owned-row-header",
 		Label:       "Caller-owned row headers",
@@ -998,9 +1003,9 @@ func callerOwnedBodyRowHeaderDocument(t *testing.T) string {
 
 func TestBrowserNoScriptEmptyStateMatchesInitialRows(t *testing.T) {
 	html := noScriptBrowserDocument(t)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = io.WriteString(w, html)
+		_, _ = io.WriteString(w, browsertest.Nonced(r, html))
 	}))
 	defer server.Close()
 	ctx := browsertest.NewBrowser(t)
@@ -1355,29 +1360,29 @@ func TestBrowserUselessFacetsAreSuppressed(t *testing.T) {
 	}
 	var out strings.Builder
 	out.WriteString(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>facet worthiness</title>`)
-	if err := Head().Render(context.Background(), &out); err != nil {
+	if err := Head().Render(fixtureCtx, &out); err != nil {
 		t.Fatal(err)
 	}
 	out.WriteString(`</head><body>`)
-	if err := Table(options("tiny"), rows(5)).Render(context.Background(), &out); err != nil {
+	if err := Table(options("tiny"), rows(5)).Render(fixtureCtx, &out); err != nil {
 		t.Fatal(err)
 	}
-	if err := Table(options("roomy"), rows(8)).Render(context.Background(), &out); err != nil {
+	if err := Table(options("roomy"), rows(8)).Render(fixtureCtx, &out); err != nil {
 		t.Fatal(err)
 	}
-	if err := Table(options("tinyq"), rows(5)).Render(context.Background(), &out); err != nil {
+	if err := Table(options("tinyq"), rows(5)).Render(fixtureCtx, &out); err != nil {
 		t.Fatal(err)
 	}
 	bare := options("bare")
 	bare.Columns = bare.Columns[:2]
-	if err := Table(bare, rows(5)).Render(context.Background(), &out); err != nil {
+	if err := Table(bare, rows(5)).Render(fixtureCtx, &out); err != nil {
 		t.Fatal(err)
 	}
 	out.WriteString(`</body></html>`)
 	html := out.String()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte(html))
+		_, _ = w.Write([]byte(browsertest.Nonced(r, html)))
 	}))
 	defer server.Close()
 
@@ -1981,7 +1986,7 @@ func TestBrowserHostChromeCascade(t *testing.T) {
 
 	var out strings.Builder
 	out.WriteString(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>cascade</title>`)
-	if err := Head().Render(context.Background(), &out); err != nil {
+	if err := Head().Render(fixtureCtx, &out); err != nil {
 		t.Fatal(err)
 	}
 	out.WriteString(`<style>
@@ -2002,14 +2007,14 @@ func TestBrowserHostChromeCascade(t *testing.T) {
 		.chip { font-size:11px; }
 		.label { font-weight:500; }
 	</style></head><body>`)
-	if err := Table(options, []entry{{Name: "one", Path: "/ws/one"}}).Render(context.Background(), &out); err != nil {
+	if err := Table(options, []entry{{Name: "one", Path: "/ws/one"}}).Render(fixtureCtx, &out); err != nil {
 		t.Fatal(err)
 	}
 	out.WriteString(`</body></html>`)
 	html := out.String()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte(html))
+		_, _ = w.Write([]byte(browsertest.Nonced(r, html)))
 	}))
 	defer server.Close()
 

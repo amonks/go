@@ -7,6 +7,7 @@ require (
 	github.com/chromedp/cdproto v0.0.0-20260714215040-dc233986426f
 	github.com/chromedp/chromedp v0.16.0
 	monks.co/pkg/browsertest v0.0.4
+	monks.co/pkg/csp v0.0.1
 )
 
 require (

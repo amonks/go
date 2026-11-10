@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"testing"
@@ -453,5 +454,27 @@ func TestWithSoftwareWebGL(t *testing.T) {
 	}
 	if !got {
 		t.Error("no WebGL 2")
+	}
+}
+
+// disabledFeatures replaces chromedp's own --disable-features list
+// rather than adding to it, so it carries a copy of that list, taken
+// from DefaultExecAllocatorOptions at the chromedp this pins. A chromedp
+// upgrade fails here until the copy is checked against the new list.
+func TestDisabledFeaturesFollowChromedp(t *testing.T) {
+	const copiedFrom = "v0.16.0"
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		t.Fatal("no build info to read chromedp's version from")
+	}
+	i := slices.IndexFunc(info.Deps, func(m *debug.Module) bool { return m.Path == "github.com/chromedp/chromedp" })
+	if i < 0 {
+		t.Fatal("chromedp is not among the test binary's modules")
+	}
+	if v := info.Deps[i].Version; v != copiedFrom {
+		t.Errorf("chromedp is %s: re-copy its DefaultExecAllocatorOptions' disable-features into disabledFeatures, then set copiedFrom", v)
+	}
+	if !strings.HasPrefix(disabledFeatures, "site-per-process,Translate,BlinkGenPropertyTrees,") {
+		t.Errorf("disabledFeatures = %q, want chromedp's list first", disabledFeatures)
 	}
 }

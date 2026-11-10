@@ -49,3 +49,39 @@ func TestGovernsScripts(t *testing.T) {
 		}
 	}
 }
+
+// The fleet's policy beside a response's own: the directives always,
+// and the script policy unless the response already governs scripts —
+// the rule pkg/browsertest enforces and the proxy states.
+func TestPolicy(t *testing.T) {
+	const directives = "base-uri 'self'; frame-ancestors 'self'; form-action 'self'; object-src 'none'"
+	if Directives != directives {
+		t.Fatalf("Directives = %q, want %q", Directives, directives)
+	}
+	for _, tc := range []struct {
+		own, want string
+	}{
+		{"", directives + "; " + ScriptPolicy("n")},
+		{"frame-ancestors 'none'", directives + "; " + ScriptPolicy("n")},
+		{"sandbox", directives},
+		{"default-src 'self'; script-src 'self' 'wasm-unsafe-eval'", directives},
+	} {
+		if got := Policy("n", tc.own); got != tc.want {
+			t.Errorf("Policy(n, %q) = %q, want %q", tc.own, got, tc.want)
+		}
+	}
+}
+
+// A content-only domain's policy: framed by the account domains named,
+// posting nowhere, and no script policy of the fleet's — every byte
+// such a domain serves carries its own sandbox.
+func TestContentPolicy(t *testing.T) {
+	got := ContentPolicy("https://ss.cx", "https://www.ss.cx")
+	want := "base-uri 'self'; frame-ancestors 'self' https://ss.cx https://www.ss.cx; form-action 'none'; object-src 'none'"
+	if got != want {
+		t.Errorf("ContentPolicy = %q, want %q", got, want)
+	}
+	if got := ContentPolicy(); got != "base-uri 'self'; frame-ancestors 'self'; form-action 'none'; object-src 'none'" {
+		t.Errorf("ContentPolicy() = %q", got)
+	}
+}

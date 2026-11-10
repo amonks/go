@@ -10,9 +10,14 @@
 // (net::ERR_NAME_NOT_RESOLVED) instead of arriving there. Every other
 // name and address is refused alike — a *.localhost name, 127.0.0.2, a
 // tailnet peer's address — so a suite serves from 127.0.0.1 or ::1. A
-// test that needs a request to a real origin answered answers it itself,
-// through CDP's Fetch domain. A suite that builds its own allocator gets
-// none of this.
+// test that needs a request to a real origin answered answers it with
+// Answer. A suite that builds its own allocator gets none of this.
+//
+// Every page a suite loads runs under the fleet's policy, enforced —
+// csp.Policy: the directives and the nonce script-src the proxy states
+// for every page — and anything the policy refuses fails the test; see
+// policy.go for how, and for what it costs a suite to answer requests
+// itself.
 //
 // A suite's whole use of it is usually two calls:
 //
@@ -156,6 +161,19 @@ const loopbackOnly = "MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1, EXC
 // a hovering one 2.
 const desktopPointer = "primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4"
 
+// disabledFeatures is chromedp's own list (DefaultExecAllocatorOptions
+// sets the flag, and a later one replaces it rather than adding to it;
+// TestDisabledFeaturesFollowChromedp holds the copy to chromedp's
+// version) plus LocalNetworkAccessChecks. The guard fulfils every page from its
+// own bytes (policy.go), and a fulfilled response carries no remote
+// address, so Chrome cannot tell the page came from loopback and its
+// Local Network Access checks refuse each request from it to another
+// loopback origin — a suite's second server, its content host, a peer.
+// Nothing but loopback resolves in this browser, so turning the checks
+// off gives a guarded page what a page loaded from the network already
+// had, and nothing more.
+const disabledFeatures = "site-per-process,Translate,BlinkGenPropertyTrees,LocalNetworkAccessChecks"
+
 // Option adjusts a browser NewBrowser is about to launch.
 type Option func(*options)
 
@@ -166,6 +184,10 @@ type options struct {
 	// execPath overrides the browser RequireChrome would resolve. Only
 	// the tests here set it, to exercise a launch that fails.
 	execPath string
+	// failed receives what the guard finds — what the script policy
+	// refused, a page it never saw — in place of failing the test. Only
+	// the tests here set it, to watch the guard at work.
+	failed func(error)
 }
 
 // withExecPath points the launch at a given binary instead of the one
@@ -173,6 +195,13 @@ type options struct {
 // environment problem, not an API one.
 func withExecPath(path string) Option {
 	return func(o *options) { o.execPath = path }
+}
+
+// withFailures collects what the guard finds instead of failing the
+// test. Unexported: a suite whose page the policy refuses has a page to
+// fix.
+func withFailures(collect func(error)) Option {
+	return func(o *options) { o.failed = collect }
 }
 
 // WithBudget overrides Budget for one browser. Reach for it when a
@@ -368,6 +397,7 @@ func newBrowser(t *testing.T, cleanup func(func()), opts ...Option) (context.Con
 		chromedp.Flag("no-sandbox", true),
 		chromedp.Flag("host-resolver-rules", loopbackOnly),
 		chromedp.Flag("blink-settings", desktopPointer),
+		chromedp.Flag("disable-features", disabledFeatures),
 		chromedp.WSURLReadTimeout(launchTimeout),
 	)
 	if cfg.webgl {
@@ -399,6 +429,14 @@ func newBrowser(t *testing.T, cleanup func(func()), opts ...Option) (context.Con
 		return nil, fmt.Errorf("launching %s: %w", chrome, err)
 	}
 
+	// The guard's stop runs after the browser has shut down, the
+	// cleanups below being LIFO: by then no request is left to answer,
+	// and every answer still in flight has returned before the test
+	// ends.
+	flushGuard, stopGuard, guardErr := guardTab(t, ctx, cfg.failed)
+	if guardErr == nil {
+		cleanup(stopGuard)
+	}
 	cleanup(cancelBrowser)
 	cleanup(cancelBudget)
 	cleanup(func() {
@@ -411,15 +449,26 @@ func newBrowser(t *testing.T, cleanup func(func()), opts ...Option) (context.Con
 		defer cancel()
 		_ = chromedp.Cancel(graceful)
 	})
+	// Registered last, so it runs first: the page's last refusals are
+	// read while there is still a page to read them from.
+	if guardErr == nil {
+		cleanup(flushGuard)
+	}
+	if guardErr != nil {
+		return nil, guardErr
+	}
 	return ctx, nil
 }
 
 // NewTab opens another tab on the browser ctx drives and returns a
-// context for it, with its own console capture and its own cleanup.
+// context for it, with its own console capture, its own guard putting
+// it under the script policy, and its own cleanup.
 //
-// It exists because chromedp's event listeners are per-target: a
-// sibling made with chromedp.NewContext alone inherits the browser and
-// the budget but not the capture, and its script errors go nowhere.
+// It exists because chromedp's event listeners and the Fetch domain are
+// per-target: a sibling made with chromedp.NewContext alone inherits
+// the browser and the budget but neither the capture nor the guard, so
+// its script errors go nowhere and its pages run with every script
+// allowed.
 func NewTab(t *testing.T, ctx context.Context) context.Context {
 	t.Helper()
 	tab, cancelTab := chromedp.NewContext(ctx)
@@ -428,6 +477,21 @@ func NewTab(t *testing.T, ctx context.Context) context.Context {
 	if err := chromedp.Run(tab); err != nil {
 		t.Fatalf("opening a tab: %v", err)
 	}
+	// Stopped before the tab closes (t.Cleanup is LIFO), which leaves
+	// requests the closing tab still makes unanswered: nothing reads
+	// them.
+	// The tab reports where its browser does, which is the test's
+	// failure unless a test here is watching.
+	var failed func(error)
+	if parent := guardOf(ctx); parent != nil {
+		failed = parent.failed
+	}
+	flush, stop, err := guardTab(t, tab, failed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(stop)
+	t.Cleanup(flush)
 	return tab
 }
 
