@@ -459,7 +459,14 @@ func streamGoogle(ctx context.Context, model Model, req Request, opts StreamOpti
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		return nil, &retryableError{err: fmt.Errorf("google API error (status %d): %s", resp.StatusCode, bytes.ToValidUTF8(body, []byte("\uFFFD"))), retryable: isRetryable(resp.StatusCode), statusCode: resp.StatusCode}
+		status := resp.StatusCode
+		if status == http.StatusBadRequest && googleKeyInvalid(body) {
+			// Google answers a bad key 400 INVALID_ARGUMENT, reason
+			// API_KEY_INVALID: a credential failure, the 401 the other
+			// providers send, and no request Rejected should report.
+			status = http.StatusUnauthorized
+		}
+		return nil, &retryableError{err: fmt.Errorf("google API error (status %d): %s", resp.StatusCode, bytes.ToValidUTF8(body, []byte("\uFFFD"))), retryable: isRetryable(status), statusCode: status}
 	}
 	events := make(chan StreamEvent, 100)
 	done := make(chan AssistantMessage, 1)
@@ -589,7 +596,13 @@ func processGoogleStream(ctx context.Context, body io.ReadCloser, model Model, e
 			partial.Usage = Usage{Input: max(0, usage.PromptTokenCount-usage.CachedContentTokenCount) + usage.ToolUsePromptTokenCount, Output: usage.CandidatesTokenCount + usage.ThoughtsTokenCount, CacheRead: usage.CachedContentTokenCount, Total: usage.TotalTokenCount}
 		}
 		if response.Error != nil {
-			return fmt.Errorf("google stream error (%s, %d): %s", response.Error.Status, response.Error.Code, response.Error.Message)
+			// The stream's error carries its HTTP-style code, which
+			// classifies it like the same error answered outright.
+			return &retryableError{
+				err:        fmt.Errorf("google stream error (%s, %d): %s", response.Error.Status, response.Error.Code, response.Error.Message),
+				retryable:  isRetryable(response.Error.Code),
+				statusCode: response.Error.Code,
+			}
 		}
 		if feedback := response.PromptFeedback; feedback != nil && feedback.BlockReason != "" && feedback.BlockReason != "BLOCK_REASON_UNSPECIFIED" {
 			terminal = true
@@ -737,4 +750,25 @@ func processGoogleStream(ctx context.Context, body io.ReadCloser, model Model, e
 		return
 	}
 	done <- msg
+}
+
+// googleKeyInvalid reports whether a Google error body names the API key
+// as invalid (google.rpc.ErrorInfo reason API_KEY_INVALID).
+func googleKeyInvalid(body []byte) bool {
+	var problem struct {
+		Error struct {
+			Details []struct {
+				Reason string `json:"reason"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &problem) != nil {
+		return false
+	}
+	for _, d := range problem.Error.Details {
+		if d.Reason == "API_KEY_INVALID" {
+			return true
+		}
+	}
+	return false
 }

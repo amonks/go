@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"math/rand"
 	"net/http"
 	"time"
@@ -34,6 +35,26 @@ func isRetryable(statusCode int) bool {
 		http.StatusBadGateway,          // 502
 		http.StatusServiceUnavailable,  // 503
 		http.StatusGatewayTimeout:      // 504
+		return true
+	default:
+		return false
+	}
+}
+
+// Rejected reports whether err is the provider rejecting the request as
+// sent: 400 (invalid — a conversation past the context window, say) or
+// 413 (too large). It will not succeed until the request or the account
+// changes: providers answer some account conditions 400 too (a spend
+// limit, a retention setting), so a caller decides how long to keep
+// trying. Rate limits and outages pass, and 401, 403 and 404 are never
+// about the request itself, so none of those count.
+func Rejected(err error) bool {
+	var re *retryableError
+	if !errors.As(err, &re) {
+		return false
+	}
+	switch re.statusCode {
+	case http.StatusBadRequest, http.StatusRequestEntityTooLarge:
 		return true
 	default:
 		return false

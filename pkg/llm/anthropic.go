@@ -108,6 +108,43 @@ type anthropicEvent struct {
 	ContentBlock *anthropicContent `json:"content_block,omitzero"`
 	Delta        *anthropicDelta   `json:"delta,omitzero"`
 	Usage        *anthropicUsage   `json:"usage,omitzero"`
+	// Error is an error event's: the API can report a failure inside an
+	// HTTP 200 stream.
+	Error *struct {
+		Type    string `json:"type"`
+		Message string `json:"message"`
+	} `json:"error,omitzero"`
+}
+
+// anthropicErrorStatus is the HTTP status an Anthropic error type stands
+// for (https://platform.claude.com/docs/en/api/errors), so an error
+// reported inside a stream classifies like the same error answered
+// outright. An unknown type is 0: unclassified.
+func anthropicErrorStatus(errType string) int {
+	switch errType {
+	case "invalid_request_error":
+		return http.StatusBadRequest
+	case "authentication_error":
+		return http.StatusUnauthorized
+	case "billing_error":
+		return http.StatusPaymentRequired
+	case "permission_error":
+		return http.StatusForbidden
+	case "not_found_error":
+		return http.StatusNotFound
+	case "request_too_large":
+		return http.StatusRequestEntityTooLarge
+	case "rate_limit_error":
+		return http.StatusTooManyRequests
+	case "api_error":
+		return http.StatusInternalServerError
+	case "timeout_error":
+		return http.StatusGatewayTimeout
+	case "overloaded_error":
+		return 529
+	default:
+		return 0
+	}
 }
 
 type anthropicAPIMsg struct {
@@ -859,6 +896,25 @@ func processAnthropicStream(ctx context.Context, body io.ReadCloser, model Model
 			if event.Usage != nil {
 				partial.Usage.Output = event.Usage.OutputTokens
 			}
+
+		case "error":
+			// A failure reported mid-stream keeps its type's status, so
+			// a streamed rejection is Rejected and an overload retryable.
+			var errType, message string
+			if event.Error != nil {
+				errType, message = event.Error.Type, event.Error.Message
+			}
+			status := anthropicErrorStatus(errType)
+			err := &retryableError{
+				err:        fmt.Errorf("anthropic stream error (%s): %s", errType, message),
+				retryable:  isRetryable(status) || status == 529,
+				statusCode: status,
+			}
+			partial.StopReason = StopReasonError
+			partial.ErrorMessage = err.Error()
+			events <- ErrorEvent{Reason: StopReasonError, Message: partial}
+			errCh <- newStreamFailure(model, partial, err)
+			return
 
 		case "message_stop":
 			// Final message - compute costs
