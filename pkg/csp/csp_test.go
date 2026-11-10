@@ -52,7 +52,7 @@ func TestGovernsScripts(t *testing.T) {
 
 // The fleet's policy beside a response's own: the directives always,
 // and the script policy unless the response already governs scripts —
-// the rule pkg/browsertest enforces and the proxy states.
+// the rule the proxy and pkg/browsertest share.
 func TestPolicy(t *testing.T) {
 	const directives = "base-uri 'self'; frame-ancestors 'self'; form-action 'self'; object-src 'none'"
 	if Directives != directives {
