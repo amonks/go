@@ -235,9 +235,10 @@ func convertToAnthropicRequest(model Model, req Request, opts StreamOptions) (an
 		// not as an omitted parameter. (Sending no effort leaves the
 		// default, which is the only level Opus 5 accepts alongside
 		// disabled thinking.) Before 4.6, omitting thinking already meant
-		// off, and Fable and Mythos think unconditionally and 400 on
-		// "disabled": both take the omission. Opus 5.5 also cannot disable
-		// thinking; Sonnet 5.5 uses between_tools for no up-front thinking.
+		// off, so those take the omission. Fable, Mythos, and Opus 5.5
+		// think unconditionally and 400 on "disabled": they are sent
+		// adaptive thinking with summarized display (below). Sonnet 5.5
+		// uses between_tools for no up-front thinking.
 		if modelUsesBetweenTools(model.ID) {
 			anthropicReq.Thinking = &anthropicThinking{Type: "between_tools"}
 		} else if modelUsesAdaptiveThinking(model.ID) && !modelAlwaysThinks(model.ID) {
@@ -264,10 +265,11 @@ func convertToAnthropicRequest(model Model, req Request, opts StreamOptions) (an
 		}
 	}
 
-	// Claude 5.5 omits thinking text by default, including progress between
-	// tool calls. Ask for summaries so streaming agent UIs keep showing it.
-	// between_tools already returns progress and accepts no display field.
-	if modelIsClaude55(model.ID) && (anthropicReq.Thinking == nil || anthropicReq.Thinking.Type == "adaptive") {
+	// Claude 5.5 and the Fable line omit thinking text by default,
+	// including progress between tool calls. Ask for summaries so
+	// streaming agent UIs keep showing it. between_tools already returns
+	// progress and accepts no display field.
+	if modelSummarizesThinking(model.ID) && (anthropicReq.Thinking == nil || anthropicReq.Thinking.Type == "adaptive") {
 		anthropicReq.Thinking = &anthropicThinking{Type: "adaptive", Display: "summarized"}
 	}
 
@@ -419,6 +421,27 @@ func modelAlwaysThinks(modelID string) bool {
 // https://platform.claude.com/docs/en/models/haiku-5-5/migration-guide
 func modelIsClaude55(id string) bool {
 	return strings.HasPrefix(id, "claude-opus-5-5") || modelUsesBetweenTools(id) || modelIsHaiku55(id)
+}
+
+// The Fable line (and its Mythos twins) thinks unconditionally, takes
+// every effort through max, and returns its notes between tool calls as
+// thinking blocks, empty unless a display is requested:
+// https://platform.claude.com/docs/en/models/fable-5-2/migration-guide
+func modelIsFable(id string) bool {
+	return strings.HasPrefix(id, "claude-fable-5") || strings.HasPrefix(id, "claude-mythos-5")
+}
+
+// modelSummarizesThinking reports the families whose requests ask for
+// summarized thinking display, since their progress between tool calls
+// arrives as thinking blocks that are otherwise empty.
+func modelSummarizesThinking(id string) bool {
+	return modelIsClaude55(id) || modelIsFable(id)
+}
+
+// modelTakesMaxEffort reports the families the adapter offers effort
+// max on.
+func modelTakesMaxEffort(id string) bool {
+	return modelIsClaude55(id) || modelIsFable(id)
 }
 
 func modelIsHaiku55(id string) bool {

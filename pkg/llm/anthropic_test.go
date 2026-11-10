@@ -544,9 +544,10 @@ func TestConvertToAnthropicRequest_ThinkingOff(t *testing.T) {
 		{"claude-sonnet-5", "", ""},
 		// Omitting thinking already means off before the 4.6 families.
 		{"claude-haiku-4-5", ThinkingOff, ""},
-		// Fable and Mythos think unconditionally and 400 on "disabled".
-		{"claude-fable-5", ThinkingOff, ""},
-		{"claude-mythos-5", ThinkingOff, ""},
+		// Fable and Mythos think unconditionally and 400 on "disabled";
+		// they still get adaptive, which asks for summarized display.
+		{"claude-fable-5", ThinkingOff, "adaptive"},
+		{"claude-mythos-5", ThinkingOff, "adaptive"},
 		// A level still asks for thinking.
 		{"claude-sonnet-5", ThinkingLow, "adaptive"},
 	} {
