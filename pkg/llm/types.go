@@ -74,6 +74,11 @@ type AssistantMessage struct {
 	StopReason   StopReason     // Why generation stopped
 	ErrorMessage string         // Set when StopReason is "error"
 	Timestamp    time.Time
+	// ThinkingDropped counts replayed thinking blocks the provider
+	// dropped from the request, because the conversation's prefix changed
+	// since they were produced or they came from another model. Not
+	// carried on the gateway wire: the gateway records it.
+	ThinkingDropped int
 }
 
 func (AssistantMessage) message() {}

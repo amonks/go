@@ -43,10 +43,20 @@ type anthropicToolChoice struct {
 }
 
 type anthropicThinking struct {
-	Type         string `json:"type"`
-	Display      string `json:"display,omitempty"`
-	BudgetTokens int    `json:"budget_tokens,omitzero"`
+	Type         string                 `json:"type"`
+	Display      string                 `json:"display,omitempty"`
+	BudgetTokens int                    `json:"budget_tokens,omitzero"`
+	BlockBinding *anthropicBlockBinding `json:"block_binding,omitzero"`
 }
+
+// anthropicBlockBinding says what the API does with a replayed thinking
+// block whose conversation prefix changed since it was produced.
+type anthropicBlockBinding struct {
+	PrefixMismatchBehavior string `json:"prefix_mismatch_behavior"`
+}
+
+// anthropicBlockBindingBeta lets a request set thinking.block_binding.
+const anthropicBlockBindingBeta = "thinking-binding-controls-2026-08-01"
 
 type anthropicMessage struct {
 	Role    string             `json:"role"`
@@ -109,6 +119,11 @@ type anthropicAPIMsg struct {
 	StopReason   string             `json:"stop_reason"`
 	StopSequence string             `json:"stop_sequence"`
 	Usage        anthropicUsage     `json:"usage"`
+	// InputTransformations lists what the API changed in the request
+	// before the model read it; present with the block-binding beta.
+	InputTransformations []struct {
+		Type string `json:"type"`
+	} `json:"input_transformations,omitzero"`
 }
 
 type anthropicDelta struct {
@@ -158,8 +173,15 @@ func streamAnthropic(ctx context.Context, model Model, req Request, opts StreamO
 	if opts.SessionID != "" {
 		httpReq.Header.Set("session_id", opts.SessionID)
 	}
+	var betas []string
 	if shouldEnableAnthropicCaching(opts.CacheRetention) {
-		httpReq.Header.Set("anthropic-beta", "prompt-caching-2024-07-31")
+		betas = append(betas, "prompt-caching-2024-07-31")
+	}
+	if anthropicReq.Thinking != nil && anthropicReq.Thinking.BlockBinding != nil {
+		betas = append(betas, anthropicBlockBindingBeta)
+	}
+	if len(betas) > 0 {
+		httpReq.Header.Set("anthropic-beta", strings.Join(betas, ","))
 	}
 
 	client := newHTTPClient(0)
@@ -271,6 +293,16 @@ func convertToAnthropicRequest(model Model, req Request, opts StreamOptions) (an
 	// progress and accepts no display field.
 	if modelSummarizesThinking(model.ID) && (anthropicReq.Thinking == nil || anthropicReq.Thinking.Type == "adaptive") {
 		anthropicReq.Thinking = &anthropicThinking{Type: "adaptive", Display: "summarized"}
+	}
+
+	// Where every account's replayed thinking is checked against the
+	// prefix it was produced under, a changed system prompt or tool list
+	// would otherwise fail every later request with the same 400. Drop
+	// the stale blocks instead: the model re-thinks, the conversation
+	// continues. Callers still keep history append-only; this is the
+	// backstop for a prompt a deploy edits under a live conversation.
+	if modelBindsEveryAccount(model.ID) && anthropicReq.Thinking != nil && anthropicReq.Thinking.Type == "adaptive" {
+		anthropicReq.Thinking.BlockBinding = &anthropicBlockBinding{PrefixMismatchBehavior: "drop_block"}
 	}
 
 	// Convert messages
@@ -436,6 +468,20 @@ func modelIsFable(id string) bool {
 // arrives as thinking blocks that are otherwise empty.
 func modelSummarizesThinking(id string) bool {
 	return modelIsClaude55(id) || modelIsFable(id)
+}
+
+// modelBindsEveryAccount reports the models that run the history-editing
+// check on every account. The others check only accounts created on or
+// after 2026-08-31, and on older ones an explicit block_binding would
+// switch the check on, so they are left unset.
+// https://platform.claude.com/docs/en/models/fable-5-2/migration-guide
+func modelBindsEveryAccount(id string) bool {
+	for _, prefix := range []string{"claude-fable-5-2", "claude-mythos-5-2", "claude-mythos-5-1"} {
+		if strings.HasPrefix(id, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // modelTakesMaxEffort reports the families the adapter offers effort
@@ -707,6 +753,11 @@ func processAnthropicStream(ctx context.Context, body io.ReadCloser, model Model
 				partial.Usage.Output = event.Message.Usage.OutputTokens
 				partial.Usage.CacheRead = event.Message.Usage.CacheReadInputTokens
 				partial.Usage.CacheWrite = event.Message.Usage.CacheCreationInputTokens
+				for _, tr := range event.Message.InputTransformations {
+					if tr.Type == "thinking_dropped" {
+						partial.ThinkingDropped++
+					}
+				}
 			}
 			events <- StartEvent{Partial: partial}
 
