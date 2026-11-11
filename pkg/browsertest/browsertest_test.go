@@ -504,3 +504,27 @@ func TestPollOutlastsAPageReplacedWhileItWaits(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// chromedp sends a poll's timeout in whole milliseconds and reads zero
+// as none at all, so a wait with less than a millisecond of its bound
+// left — a retry late in it, a bound of nothing — gives up rather than
+// polling unbounded until Step's backstop.
+func TestPollWithNoTimeLeftGivesUp(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, `<!doctype html><p>never</p>`)
+	}))
+	defer server.Close()
+	ctx := NewBrowser(t)
+	if err := chromedp.Run(ctx, Step("open the page", chromedp.Navigate(server.URL))); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	err := chromedp.Run(ctx, poll(`false`, 0))
+	if err == nil {
+		t.Fatal("a wait for something false succeeded")
+	}
+	if took := time.Since(start); took > 5*time.Second {
+		t.Errorf("a wait with no time left took %s: it polled unbounded", took.Round(time.Second))
+	}
+}

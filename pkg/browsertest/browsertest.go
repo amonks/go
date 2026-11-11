@@ -296,13 +296,15 @@ const pageSnapshot = `(() => {
 func poll(expr string, timeout time.Duration) chromedp.Action {
 	return chromedp.ActionFunc(func(ctx context.Context) error {
 		deadline := time.Now().Add(timeout)
-		var err error
-		for {
+		// chromedp sends the timeout in whole milliseconds and reads zero
+		// as none, so less than one left is none left.
+		err := fmt.Errorf("wait for %s: %w", expr, chromedp.ErrPollingTimeout)
+		for time.Until(deadline) >= time.Millisecond {
 			err = Step("wait for "+expr, chromedp.Poll(expr, nil, chromedp.WithPollingTimeout(time.Until(deadline)))).Do(ctx)
 			if err == nil {
 				return nil
 			}
-			if !documentReplaced(err) || time.Until(deadline) <= 0 || ctx.Err() != nil {
+			if !documentReplaced(err) || ctx.Err() != nil {
 				break
 			}
 		}
