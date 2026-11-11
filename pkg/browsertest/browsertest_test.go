@@ -18,6 +18,8 @@ import (
 
 	"github.com/chromedp/chromedp"
 	"github.com/chromedp/chromedp/device"
+
+	"monks.co/pkg/csp"
 )
 
 // TestStepNamesAStalledWait is the reason Step exists: an action that
@@ -476,5 +478,29 @@ func TestDisabledFeaturesFollowChromedp(t *testing.T) {
 	}
 	if !strings.HasPrefix(disabledFeatures, "site-per-process,Translate,BlinkGenPropertyTrees,") {
 		t.Errorf("disabledFeatures = %q, want chromedp's list first", disabledFeatures)
+	}
+}
+
+// A page can be replaced while a wait is running on it — a redirect
+// landing late, a page that moves itself on — and the wait is for the
+// page the test is going to, not the one it was on: it keeps waiting,
+// in the new document, rather than failing because the old one went.
+func TestPollOutlastsAPageReplacedWhileItWaits(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		if r.URL.Path == "/second" {
+			fmt.Fprint(w, `<!doctype html><title>second</title>`)
+			return
+		}
+		fmt.Fprintf(w, `<!doctype html><title>first</title><script nonce="%s">setTimeout(() => location.replace("/second"), 200)</script>`, r.Header.Get(csp.NonceHeader))
+	}))
+	defer server.Close()
+
+	ctx := NewBrowser(t)
+	if err := chromedp.Run(ctx,
+		Step("open the first page", chromedp.Navigate(server.URL)),
+		Poll(`document.title === "second"`),
+	); err != nil {
+		t.Fatal(err)
 	}
 }

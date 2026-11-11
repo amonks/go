@@ -286,11 +286,25 @@ const pageSnapshot = `(() => {
 // needn't wait out StepTimeout. The bound is the in-page one, which
 // reports chromedp.ErrPollingTimeout; Step's context bound around it
 // is the backstop for a page that stops answering at all.
+//
+// A wait outlasts the page it started on. A poll runs in the page, so
+// a document replaced while it runs — a redirect that lands after
+// Navigate has returned, a page that moves itself on — takes the poll
+// with it, and chromedp reports the old document's going as the poll's
+// failure. The wait is for the page the test is going to, so it starts
+// again in the new document, inside the same bound.
 func poll(expr string, timeout time.Duration) chromedp.Action {
 	return chromedp.ActionFunc(func(ctx context.Context) error {
-		err := Step("wait for "+expr, chromedp.Poll(expr, nil, chromedp.WithPollingTimeout(timeout))).Do(ctx)
-		if err == nil {
-			return nil
+		deadline := time.Now().Add(timeout)
+		var err error
+		for {
+			err = Step("wait for "+expr, chromedp.Poll(expr, nil, chromedp.WithPollingTimeout(time.Until(deadline)))).Do(ctx)
+			if err == nil {
+				return nil
+			}
+			if !documentReplaced(err) || time.Until(deadline) <= 0 || ctx.Err() != nil {
+				break
+			}
 		}
 		// Read on the caller's context, the step's being spent, and
 		// briefly: a page that cannot answer is itself the finding.
@@ -302,6 +316,22 @@ func poll(expr string, timeout time.Duration) chromedp.Action {
 		}
 		return fmt.Errorf("%w\npage: %s", err, page)
 	})
+}
+
+// documentReplaced says whether err is the page's document going away
+// under a running evaluation, in each of the ways CDP says so.
+func documentReplaced(err error) bool {
+	msg := err.Error()
+	for _, gone := range []string{
+		"Inspected target navigated or closed",
+		"Execution context was destroyed",
+		"Cannot find context with specified id",
+	} {
+		if strings.Contains(msg, gone) {
+			return true
+		}
+	}
+	return false
 }
 
 // RequireChrome resolves a Chrome/Chromium binary on PATH and returns
