@@ -72,8 +72,11 @@ type anthropicContent struct {
 	Source    *anthropicSource `json:"source,omitzero"`
 	ID        string           `json:"id,omitempty"`
 	Name      string           `json:"name,omitempty"`
-	Input     map[string]any   `json:"input,omitempty"`
-	ToolUseID string           `json:"tool_use_id,omitempty"`
+	// Input is a tool_use's arguments, which the API requires even when
+	// empty: omitzero leaves out only the nil the other block types carry,
+	// so a tool_use must always set a map, {} for a call with none.
+	Input     map[string]any `json:"input,omitzero"`
+	ToolUseID string         `json:"tool_use_id,omitempty"`
 	// Content is a tool_result's payload: the API takes a plain string or an
 	// array of text/image blocks, so this holds a string or
 	// []anthropicContent (nil omits the key, the shape an empty result has
@@ -654,11 +657,20 @@ func convertContentBlocksToAnthropic(model Model, blocks []ContentBlock) []anthr
 				},
 			})
 		case ToolCall:
+			// A call with no arguments goes as input {}: a parsed empty
+			// object, or the nil of a call cut off mid-JSON or of a
+			// history stored when the wire dropped the empty object. The
+			// API refuses a tool_use without input, and the history
+			// replays on every later request.
+			input := b.Arguments
+			if input == nil {
+				input = map[string]any{}
+			}
 			result = append(result, anthropicContent{
 				Type:  "tool_use",
 				ID:    b.ID,
 				Name:  b.Name,
-				Input: b.Arguments,
+				Input: input,
 			})
 		}
 	}
@@ -873,9 +885,16 @@ func processAnthropicStream(ctx context.Context, body io.ReadCloser, model Model
 			}
 			if idx, ok := blockPositions[event.Index]; ok {
 				if tc, ok := partial.Content[idx].(ToolCall); ok {
-					// Parse accumulated JSON
+					// Parse accumulated JSON. A block that streamed none
+					// is a call with no arguments: the empty object (for
+					// a client tool, what its start block announces). One
+					// cut off mid-JSON keeps nil, arguments that never
+					// arrived.
 					jsonStr := toolCallJSONs[event.Index]
-					if jsonStr != "" {
+					if jsonStr == "" {
+						tc.Arguments = map[string]any{}
+						partial.Content[idx] = tc
+					} else {
 						var args map[string]any
 						if err := json.Unmarshal([]byte(jsonStr), &args, Passthrough); err == nil {
 							tc.Arguments = args
