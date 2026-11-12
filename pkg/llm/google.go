@@ -458,7 +458,7 @@ func streamGoogle(ctx context.Context, model Model, req Request, opts StreamOpti
 	}
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		body := readErrorBody(resp.Body)
 		status := resp.StatusCode
 		if status == http.StatusBadRequest && googleKeyInvalid(body) {
 			// Google answers a bad key 400 INVALID_ARGUMENT, reason

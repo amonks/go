@@ -69,15 +69,15 @@ func ModelLimits(ctx context.Context, model Model) (Limits, error) {
 		return Limits{}, fmt.Errorf("model limits: %w", err)
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return Limits{}, fmt.Errorf("model limits: %w", err)
-	}
 	if resp.StatusCode == http.StatusNotFound {
 		return Limits{}, fmt.Errorf("model limits: %s: %w", model.ID, ErrModelNotFound)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return Limits{}, fmt.Errorf("model limits: anthropic API error (status %d): %s", resp.StatusCode, body)
+		return Limits{}, fmt.Errorf("model limits: anthropic API error (status %d): %s", resp.StatusCode, readErrorBody(resp.Body))
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return Limits{}, fmt.Errorf("model limits: %w", err)
 	}
 	var out struct {
 		MaxInputTokens int `json:"max_input_tokens"`

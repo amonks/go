@@ -233,7 +233,7 @@ func streamAnthropic(ctx context.Context, model Model, req Request, opts StreamO
 
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
-		bodyBytes, _ := io.ReadAll(resp.Body)
+		bodyBytes := readErrorBody(resp.Body)
 		err := fmt.Errorf("anthropic API error (status %d): %s", resp.StatusCode, strings.ToValidUTF8(string(bodyBytes), "\uFFFD"))
 		return nil, &retryableError{
 			err:        err,

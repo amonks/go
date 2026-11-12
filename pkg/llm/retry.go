@@ -111,6 +111,9 @@ func calculateNextWait(current time.Duration, config RetryConfig) time.Duration 
 //   - HTTP 429 (rate limit), 500, 502, 503, 504: retried
 //   - HTTP 4xx (except 429): not retried (client errors)
 //   - Unsupported model.API: not retried (permanent configuration error)
+//   - A request refused before it is sent (options that contradict each
+//     other, content an adapter cannot encode): not retried, since it is
+//     refused the same way every time
 //   - Context cancellation: stops retrying immediately
 func StreamWithRetry(ctx context.Context, model Model, req Request, opts StreamOptions, config RetryConfig) (*StreamHandle, error) {
 	var lastErr error
@@ -133,15 +136,23 @@ func StreamWithRetry(ctx context.Context, model Model, req Request, opts StreamO
 		lastErr = err
 
 		// Check if error is explicitly marked as non-retryable
-		if re, ok := err.(*retryableError); ok {
-			if !re.retryable {
-				return nil, err
-			}
+		re, marked := err.(*retryableError)
+		if marked && !re.retryable {
+			return nil, err
 		}
 
 		// Check for context cancellation
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
+		}
+
+		// An error no adapter marked never left this process: the request
+		// was refused before it was sent, and is refused the same way on
+		// every attempt. Only what an adapter marked retryable — a
+		// transport failure, a status that passes on its own — is asked
+		// again.
+		if !marked {
+			return nil, err
 		}
 	}
 

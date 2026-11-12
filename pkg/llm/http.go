@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"io"
 	"net/http"
 	"time"
 )
@@ -27,4 +28,20 @@ func newHTTPClient(timeout time.Duration) *http.Client {
 		Timeout:       timeout,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
+}
+
+// errorBodyLimit bounds how much of a failed response is read into the
+// error it becomes. An API's error document is a few hundred bytes, so
+// the limit never shortens one. It is there for whatever else answers
+// at a base URL — a proxy's page, a misconfigured endpoint, a body that
+// never ends — whose size would otherwise be this process's memory, and
+// every log line the error lands in.
+const errorBodyLimit = 64 << 10
+
+// readErrorBody reads at most errorBodyLimit of a failed response's
+// body. A read that fails partway keeps what arrived: the status is the
+// error, and the body only explains it.
+func readErrorBody(body io.Reader) []byte {
+	b, _ := io.ReadAll(io.LimitReader(body, errorBodyLimit))
+	return b
 }
