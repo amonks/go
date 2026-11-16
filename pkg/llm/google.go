@@ -174,13 +174,12 @@ func convertToGoogleRequest(model Model, req Request, opts StreamOptions) (googl
 	if opts.MaxTokens != nil && limit <= 0 {
 		return out, fmt.Errorf("google maxOutputTokens must be positive")
 	}
-	// Argon budgets above one streaming hop opt into a different protocol:
+	// Gemini 4 budgets above one streaming hop opt into a different protocol:
 	// CONTINUATION plus a continuation token. Until we support that protocol,
 	// refuse it before generation rather than fail after consuming the budget.
 	// This boundary is not a replacement for the Models API's default limit.
-	// https://ai.google.dev/gemini-api/docs/generate-content/long-decode
-	if model.ID == "gemini-4-argon" && limit > 65536 {
-		return out, fmt.Errorf("google gemini-4-argon output caps above 65536 require unsupported continuation")
+	if hop, ok := googleLongDecodeHop(model.ID); ok && limit > hop {
+		return out, fmt.Errorf("google %s output caps above %d require unsupported continuation", model.ID, hop)
 	}
 	thinking, err := googleThinking(model.ID, opts.ThinkingLevel)
 	if err != nil {
