@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/a-h/templ"
-	"pgregory.net/rapid"
+	"hegel.dev/go/hegel"
 )
 
 type testPerson struct {
@@ -253,10 +253,10 @@ func TestLowLevelCellDefaultsBehaviorToItsValue(t *testing.T) {
 }
 
 func TestRowHeaderRenderingProperties(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-		rowCount := rapid.IntRange(0, 30).Draw(t, "row count")
-		firstIsRowHeader := rapid.Bool().Draw(t, "first row header")
-		secondIsRowHeader := rapid.Bool().Draw(t, "second row header")
+	hegel.Test(t, func(t *hegel.T) {
+		rowCount := hegel.Draw(t, hegel.Integers(0, 30))
+		firstIsRowHeader := hegel.Draw(t, hegel.Booleans())
+		secondIsRowHeader := hegel.Draw(t, hegel.Booleans())
 		rows := make([]int, rowCount)
 		columns := []Column[int]{
 			{
@@ -282,7 +282,7 @@ func TestRowHeaderRenderingProperties(t *testing.T) {
 			rowHeaderColumns++
 		}
 		if count, want := strings.Count(got, `scope="row"`), rowCount*rowHeaderColumns; count != want {
-			t.Fatalf("row header count = %d, want %d\n%s", count, want, got)
+			t.Fatalf("row header count = %d, want %d (%d rows, row headers first=%v second=%v)\n%s", count, want, rowCount, firstIsRowHeader, secondIsRowHeader, got)
 		}
 		if count, want := strings.Count(got, `data-dg-value=`), rowCount*len(columns); count != want {
 			t.Fatalf("behavioral cell count = %d, want %d\n%s", count, want, got)
@@ -307,7 +307,7 @@ func TestRowHeaderRenderingProperties(t *testing.T) {
 			t.Fatalf("row-header attributes differ from ordinary cell:\nrow header: %s\nordinary:   %s", got, want)
 		}
 
-		lowLevelRowHeader := rapid.Bool().Draw(t, "low-level row header")
+		lowLevelRowHeader := hegel.Draw(t, hegel.Booleans())
 		cell := ordinaryCell
 		if lowLevelRowHeader {
 			cell = rowHeaderCell
@@ -356,8 +356,8 @@ func cellOpeningAttributes(t testFatalfer, rendered, prefix string) string {
 }
 
 func TestInitialEmptyStateVisibilityProperties(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-		rowCount := rapid.IntRange(0, 100).Draw(t, "row count")
+	hegel.Test(t, func(t *hegel.T) {
+		rowCount := hegel.Draw(t, hegel.Integers(0, 100))
 		customEmpty := templ.Raw(`<p data-empty-marker>Nothing here yet.</p>`)
 		rows := make([]string, rowCount)
 		for i := range rows {

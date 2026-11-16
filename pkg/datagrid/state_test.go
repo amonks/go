@@ -6,7 +6,7 @@ import (
 	"slices"
 	"testing"
 
-	"pgregory.net/rapid"
+	"hegel.dev/go/hegel"
 )
 
 var interestingValues = []string{
@@ -14,25 +14,25 @@ var interestingValues = []string{
 	"quote\"apostrophe'", "<script>&", "line\nbreak", "emoji 🐙",
 }
 
-func drawState(t *rapid.T, label string, columns []string) State {
+func drawState(t hegel.TestCase, columns []string) State {
 	state := State{
-		Search: rapid.SampledFrom(interestingValues).Draw(t, label+"-search"),
-		Page:   rapid.IntRange(-3, 30).Draw(t, label+"-page"),
+		Search: hegel.Draw(t, hegel.SampledFrom(interestingValues)),
+		Page:   hegel.Draw(t, hegel.Integers(-3, 30)),
 	}
-	if rapid.Bool().Draw(t, label+"-sort-set") {
-		state.Sort = rapid.SampledFrom(append(slices.Clone(columns), "unknown")).Draw(t, label+"-sort")
-		state.Descending = rapid.Bool().Draw(t, label+"-descending")
+	if hegel.Draw(t, hegel.Booleans()) {
+		state.Sort = hegel.Draw(t, hegel.SampledFrom(append(slices.Clone(columns), "unknown")))
+		state.Descending = hegel.Draw(t, hegel.Booleans())
 	}
 	state.Filters = make(map[string][]string)
 	filterColumns := append(slices.Clone(columns), "unknown")
 	for _, column := range filterColumns {
-		if !rapid.Bool().Draw(t, label+"-filter-"+column) {
+		if !hegel.Draw(t, hegel.Booleans()) {
 			continue
 		}
-		count := rapid.IntRange(0, 8).Draw(t, label+"-filter-count-"+column)
+		count := hegel.Draw(t, hegel.Integers(0, 8))
 		for range count {
 			state.Filters[column] = append(state.Filters[column],
-				rapid.SampledFrom(interestingValues).Draw(t, label+"-filter-value-"+column))
+				hegel.Draw(t, hegel.SampledFrom(interestingValues)))
 		}
 	}
 	return state
@@ -49,10 +49,10 @@ func TestQueryCodecRoundTripsNormalizedState(t *testing.T) {
 		},
 	}
 
-	rapid.Check(t, func(t *rapid.T) {
+	hegel.Test(t, func(t *hegel.T) {
 		codec := baseCodec
-		codec.Disabled = Feature(rapid.IntRange(0, int(allFeatures)).Draw(t, "disabled"))
-		state := drawState(t, "state", columns)
+		codec.Disabled = Feature(hegel.Draw(t, hegel.Integers(0, int(allFeatures))))
+		state := drawState(t, columns)
 		query := url.Values{
 			"unrelated":       {"first", "second"},
 			"dg.other.search": {"leave me alone"},
@@ -70,7 +70,7 @@ func TestQueryCodecRoundTripsNormalizedState(t *testing.T) {
 			want = codec.Normalize(codec.Defaults)
 		}
 		if !statesEqual(got, want) {
-			t.Fatalf("round trip\n got: %#v\nwant: %#v\nquery: %s", got, want, query.Encode())
+			t.Fatalf("round trip of %#v with disabled=%#x\n got: %#v\nwant: %#v\nquery: %s", state, codec.Disabled, got, want, query.Encode())
 		}
 		if !slices.Equal(query["unrelated"], unrelated) || !slices.Equal(query["dg.other.search"], other) {
 			t.Fatalf("encoding changed another owner's values: %#v", query)

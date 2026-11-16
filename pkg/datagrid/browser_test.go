@@ -21,7 +21,7 @@ import (
 	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/chromedp"
 	"github.com/chromedp/chromedp/kb"
-	"pgregory.net/rapid"
+	"hegel.dev/go/hegel"
 
 	"monks.co/pkg/browsertest"
 )
@@ -1653,24 +1653,24 @@ func TestBrowserPipelineMatchesReferenceProperties(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rapid.Check(t, func(t *rapid.T) {
+	hegel.Test(t, func(t *hegel.T) {
 		state := State{
-			Search:  rapid.SampledFrom([]string{"", "research", "navy", "types", "person", "london"}).Draw(t, "search"),
-			Page:    rapid.IntRange(-2, 8).Draw(t, "page"),
+			Search:  hegel.Draw(t, hegel.SampledFrom([]string{"", "research", "navy", "types", "person", "london"})),
+			Page:    hegel.Draw(t, hegel.Integers(-2, 8)),
 			Filters: make(map[string][]string),
 		}
-		if rapid.Bool().Draw(t, "sort-enabled") {
-			state.Sort = rapid.SampledFrom([]string{"name", "score", "joined", "active"}).Draw(t, "sort")
-			state.Descending = rapid.Bool().Draw(t, "descending")
+		if hegel.Draw(t, hegel.Booleans()) {
+			state.Sort = hegel.Draw(t, hegel.SampledFrom([]string{"name", "score", "joined", "active"}))
+			state.Descending = hegel.Draw(t, hegel.Booleans())
 		}
-		if rapid.Bool().Draw(t, "team-filter") {
-			state.Filters["team"] = rapid.SampledFrom([][]string{
+		if hegel.Draw(t, hegel.Booleans()) {
+			state.Filters["team"] = hegel.Draw(t, hegel.SampledFrom([][]string{
 				{"Research"}, {"Navy"}, {"Systems"}, {"Research", "Navy"},
 				{"😀", "\uE000", "😀"},
-			}).Draw(t, "teams")
+			}))
 		}
-		if rapid.Bool().Draw(t, "tag-filter") {
-			state.Filters["tags"] = rapid.SampledFrom([][]string{{"math"}, {"types"}, {"compilers"}, {"math", "space"}}).Draw(t, "tags")
+		if hegel.Draw(t, hegel.Booleans()) {
+			state.Filters["tags"] = hegel.Draw(t, hegel.SampledFrom([][]string{{"math"}, {"types"}, {"compilers"}, {"math", "space"}}))
 		}
 
 		encoded, _ := json.Marshal(state, json.Deterministic(true))
