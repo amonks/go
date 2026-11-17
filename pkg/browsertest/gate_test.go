@@ -13,13 +13,21 @@ import (
 )
 
 // A page holding a form that asks before it submits fails its test
-// unless it carries the gate that asks; what the gate does not read —
-// a button with no form to submit, a button that submits nothing —
-// fails nothing.
+// unless it carries the gate that asks, live; what the gate does not
+// read — a button with no form to submit, a button that submits
+// nothing — fails nothing. The gate here stands in for pkg/confirm's
+// (which this module doesn't import) by doing what makes one live:
+// putting a submit listener on the window in the capture phase.
+// Carrying the gate's id is not enough: an empty script asks nothing,
+// and neither does one listening in the bubble phase.
 func TestAFormThatAsksNeedsTheGate(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		nonce := r.Header.Get(csp.NonceHeader)
-		gate := fmt.Sprintf(`<script id="monks-confirm-script" nonce="%s"></script>`, nonce)
+		gate := fmt.Sprintf(`<script id="monks-confirm-script" nonce="%s">window.addEventListener("submit", () => {}, true);</script>`, nonce)
+		inert := func(body string) string {
+			return fmt.Sprintf(`<!doctype html><head><script id="monks-confirm-script" nonce="%s">%s</script></head>`, nonce, body) +
+				`<form method="post" data-confirm="Delete it?"><button>go</button></form>`
+		}
 		w.Header().Set("Content-Type", "text/html")
 		switch r.URL.Path {
 		case "/form":
@@ -28,6 +36,10 @@ func TestAFormThatAsksNeedsTheGate(t *testing.T) {
 			fmt.Fprint(w, `<!doctype html><form method="post"><button data-confirm="Discard it?">go</button></form>`)
 		case "/gated":
 			fmt.Fprint(w, `<!doctype html><head>`+gate+`</head><form method="post" data-confirm="Delete it?"><button data-confirm="Discard it?">go</button></form>`)
+		case "/empty":
+			fmt.Fprint(w, inert(""))
+		case "/bubbling":
+			fmt.Fprint(w, inert(`window.addEventListener("submit", () => {});`))
 		case "/others":
 			fmt.Fprint(w, `<!doctype html><button data-confirm="Restart?">outside any form</button>`+
 				`<form method="post" data-confirm=""><button type="button" data-confirm="Nothing?">submits nothing</button></form>`)
@@ -50,6 +62,8 @@ func TestAFormThatAsksNeedsTheGate(t *testing.T) {
 		{"a form's question", "/form", "Delete it?", false},
 		{"a button's question", "/button", "Discard it?", false},
 		{"under the gate", "/gated", "", false},
+		{"under an empty script with the gate's id", "/empty", "Delete it?", false},
+		{"under a script with the gate's id listening too late", "/bubbling", "Delete it?", false},
 		{"what the gate doesn't read", "/others", "", false},
 		{"a form inserted after load, when it submits", "/later", "Delete it?", true},
 	} {
