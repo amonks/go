@@ -17,7 +17,9 @@
 // csp.Policy: the directives and the nonce script-src the proxy states
 // for every page — and anything the policy refuses fails the test; see
 // policy.go for how, and for what it costs a suite to answer requests
-// itself.
+// itself. So does a page holding a form that asks before it submits
+// (data-confirm) without pkg/confirm's gate, which would post it
+// unasked; see gate.go.
 //
 // A suite's whole use of it is usually two calls:
 //

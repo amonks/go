@@ -321,16 +321,24 @@ func guardTab(t *testing.T, ctx context.Context, failed func(error)) (flush, sto
 		case *page.EventFrameNavigated:
 			g.committed(event.Frame)
 		case *runtime.EventBindingCalled:
-			if event.Name == violationBinding {
+			switch event.Name {
+			case violationBinding:
 				g.event(event.Payload)
+			case gateBinding:
+				g.ungated(event.Payload)
 			}
 		}
 	})
 	if err := chromedp.Run(ctx,
 		runtime.AddBinding(violationBinding),
+		runtime.AddBinding(gateBinding),
 		chromedp.ActionFunc(func(ctx context.Context) error {
-			_, err := page.AddScriptToEvaluateOnNewDocument(violationListener).Do(ctx)
-			return err
+			for _, listener := range []string{violationListener, gateListener} {
+				if _, err := page.AddScriptToEvaluateOnNewDocument(listener).Do(ctx); err != nil {
+					return err
+				}
+			}
+			return nil
 		}),
 		g.enable(),
 	); err != nil {
