@@ -293,11 +293,14 @@ monks-datagrid .datagrid-filter-search {
   padding: 0.48rem 0.65rem;
 }
 
-monks-datagrid .datagrid-filter:last-of-type > .datagrid-filter-options {
+/* The last of several facets sits toward the panel's far edge, so its
+   menu opens back toward the start; a lone facet sits at the start, and
+   a menu aligned to its far side would open off the page. */
+monks-datagrid .datagrid-filter:last-of-type:not(:first-of-type) > .datagrid-filter-options {
   inset-inline: auto 0;
 }
 
-monks-datagrid .datagrid-filter:last-of-type > .datagrid-filter-search {
+monks-datagrid .datagrid-filter:last-of-type:not(:first-of-type) > .datagrid-filter-search {
   inset-inline: auto 0.45rem;
 }
 
