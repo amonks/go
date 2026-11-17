@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/chromedp/cdproto/input"
+	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 	"github.com/chromedp/chromedp/device"
 	"github.com/chromedp/chromedp/kb"
@@ -580,7 +581,7 @@ document.querySelector("#deep").addEventListener("click", () => note("deep"));
 // mousedown), was pressed as a person presses it, and its act is done.
 func TestAClickWhoseTargetGoesMidPressFails(t *testing.T) {
 	server := actPages(t, map[string]string{
-		"/":      `<button id=go>Go</button><script nonce="` + FixtureNonce + `">document.addEventListener("click", (e) => note("click " + e.target.id));</script>`,
+		"/": `<button id=go>Go</button><script nonce="` + FixtureNonce + `">document.addEventListener("click", (e) => note("click " + e.target.id));</script>`,
 		"/chips": `<div id=chips><span class=chip>#car</span></div>
 <script nonce="` + FixtureNonce + `">
 document.querySelector("#chips").addEventListener("mousedown", (e) => {
@@ -675,5 +676,66 @@ func TestTextReadsWhatIsShown(t *testing.T) {
 	err := chromedp.Run(ctx, chromedp.Navigate(server.URL+"/never"), Text("#answer", &text, withTimeout(300*time.Millisecond)))
 	if err == nil || !strings.Contains(err.Error(), "is not visible") {
 		t.Errorf("reading a hidden element: %v, want it refused as not visible", err)
+	}
+}
+
+// TestAWaitAbandonedByNavigationStaysAbandoned: an act or a poll waiting
+// in a page the test then leaves — back, into a page the browser keeps
+// in its back/forward cache — has its evaluation failed by Chrome and
+// starts again in the page the test went to. What it left must not wake
+// when that cached page comes back (forward): an act's readiness loop
+// resuming there would set, focus or arm things the test never asked of
+// that page, and a poll's would keep running its expression.
+func TestAWaitAbandonedByNavigationStaysAbandoned(t *testing.T) {
+	server := actPages(t, map[string]string{
+		"/a": `<select id=field><option>none<option>chosen</select><a id=on href="/b">on</a>`,
+		"/b": `<select id=field disabled><option>none<option>chosen</select>
+<script nonce="` + FixtureNonce + `">
+window.checks = 0;
+addEventListener("pageshow", (e) => { if (e.persisted) document.querySelector("#field").disabled = false; });
+</script>`,
+	})
+	ctx := NewBrowser(t)
+	back := eval(`setTimeout(() => history.back(), 200); true`)
+	var a, b string
+	var checks, later int
+	var cached bool
+	if err := chromedp.Run(ctx,
+		Open(server.URL+"/a"),
+		Click("#on"),
+		Poll(`location.pathname === "/b" && document.readyState === "complete"`),
+		chromedp.Evaluate(`window.wasB = true`, nil),
+		chromedp.ActionFunc(back),
+		// Waits in /b for its select to enable; goes back, and sets /a's.
+		SetValue("#field", "chosen"),
+		chromedp.Evaluate(`document.querySelector("#field").value`, &a),
+		chromedp.Evaluate(`history.forward(); true`, nil),
+		Poll(`location.pathname === "/b" && window.wasB === true`),
+		// Let /b's timers run, then see whether the abandoned wait woke.
+		chromedp.Evaluate(`new Promise((r) => setTimeout(r, 300))`, nil, func(p *runtime.EvaluateParams) *runtime.EvaluateParams { return p.WithAwaitPromise(true) }),
+		chromedp.Evaluate(`document.querySelector("#field").value`, &b),
+		chromedp.Evaluate(`window.wasB === true`, &cached),
+		// A poll in /b counting its checks, abandoned the same way.
+		chromedp.ActionFunc(back),
+		Poll(`(window.checks = (window.checks ?? 0) + 1, location.pathname === "/a")`),
+		chromedp.Evaluate(`history.forward(); true`, nil),
+		Poll(`location.pathname === "/b"`),
+		chromedp.Evaluate(`window.checks`, &checks),
+		chromedp.Evaluate(`new Promise((r) => setTimeout(r, 300))`, nil, func(p *runtime.EvaluateParams) *runtime.EvaluateParams { return p.WithAwaitPromise(true) }),
+		chromedp.Evaluate(`window.checks`, &later),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if !cached {
+		t.Skip("forward reloaded /b instead of restoring it from the back/forward cache; nothing was abandoned there")
+	}
+	if a != "chosen" {
+		t.Errorf("/a's field is %q, want the act to have set it", a)
+	}
+	if b != "none" {
+		t.Errorf("/b's field is %q: the act abandoned there woke when /b came back", b)
+	}
+	if later != checks {
+		t.Errorf("the poll abandoned in /b checked %d more times after /b came back", later-checks)
 	}
 }

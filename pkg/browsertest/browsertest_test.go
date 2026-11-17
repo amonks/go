@@ -528,3 +528,40 @@ func TestPollWithNoTimeLeftGivesUp(t *testing.T) {
 		t.Errorf("a wait with no time left took %s: it polled unbounded", took.Round(time.Second))
 	}
 }
+
+// TestPollOutlastsABackForwardCacheRestore: a poll that starts as the
+// test goes back to a page the browser kept in its back/forward cache
+// holds in the restored page. chromedp's own poll, which browsertest's
+// rode on, could wait there forever: a restore delivers
+// DOM.documentUpdated before Page.frameNavigated, which leaves chromedp's
+// frame without the root its poll waits for (CI run 2658). Whether a
+// restore's events arrive in that order is Chrome's to decide, so the
+// test goes back several times; against the old poll it went red in 4
+// runs of 10 under BROWSERTEST_CPU_THROTTLE=6.
+func TestPollOutlastsABackForwardCacheRestore(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `<!doctype html><title>t</title><p id=where>%s</p><a id=on href="/b">on</a>`, r.URL.Path)
+	}))
+	defer server.Close()
+
+	ctx := NewBrowser(t)
+	if err := chromedp.Run(ctx, Open(server.URL+"/a"), chromedp.Evaluate(`window.wasHere = true`, nil)); err != nil {
+		t.Fatal(err)
+	}
+	for cycle := range 5 {
+		var cached bool
+		if err := chromedp.Run(ctx,
+			Click("#on"),
+			Poll(`location.pathname === "/b" && document.readyState === "complete"`),
+			chromedp.Evaluate(`setTimeout(() => history.back(), 100); true`, nil),
+			poll(`location.pathname === "/a"`, 20*time.Second),
+			chromedp.Evaluate(`window.wasHere === true`, &cached),
+		); err != nil {
+			t.Fatalf("cycle %d: %v", cycle, err)
+		}
+		if !cached {
+			t.Skip("back reloaded /a instead of restoring it from the back/forward cache; nothing was restored")
+		}
+	}
+}

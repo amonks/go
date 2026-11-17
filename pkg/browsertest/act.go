@@ -106,15 +106,15 @@ func withTimeout(d time.Duration) ActOption {
 
 // act is one act, and Do performs it.
 type act struct {
-	verb    string
-	sel     string
-	spec    actSpec
-	mods    input.Modifier
-	clicks  int
-	tap     bool
-	keys    string
-	text    string
-	read    *string
+	verb     string
+	sel      string
+	spec     actSpec
+	mods     input.Modifier
+	clicks   int
+	tap      bool
+	keys     string
+	text     string
+	read     *string
 	between  func(context.Context) error
 	midPress func(context.Context) error
 	timeout  time.Duration
@@ -270,6 +270,9 @@ type prepared struct {
 	Framed  bool    `json:"framed"`
 	Doc     string  `json:"doc"`
 	Text    string  `json:"text"`
+	// Left is the page hiding while the act waited for it: the act
+	// starts again in the document that replaced it.
+	Left bool `json:"left"`
 }
 
 // Do performs the act, aiming again whenever its input landed
@@ -286,7 +289,7 @@ func (a *act) Do(ctx context.Context) error {
 		}
 		var p prepared
 		err := evaluate(ctx, actCall("ready", a.sel, a.spec, left.Milliseconds()), &p)
-		if documentReplaced(err) {
+		if documentReplaced(err) || (err == nil && p.Left) {
 			continue
 		}
 		if err != nil {
@@ -461,7 +464,7 @@ func SetFiles(sel string, paths []string, opts ...ActOption) chromedp.Action {
 				break
 			}
 			var held *runtime.RemoteObject
-			expr := `(async () => { const r = await ` + actCall("ready", a.sel, a.spec, left.Milliseconds()) + `; return r.problem ?? r.element; })()`
+			expr := `(async () => { const r = await ` + actCall("ready", a.sel, a.spec, left.Milliseconds()) + `; return r.left ? undefined : r.problem ?? r.element; })()`
 			err := chromedp.Evaluate(expr, &held, func(p *runtime.EvaluateParams) *runtime.EvaluateParams {
 				return p.WithAwaitPromise(true)
 			}).Do(ctx)
@@ -470,6 +473,11 @@ func SetFiles(sel string, paths []string, opts ...ActOption) chromedp.Action {
 			}
 			if err != nil {
 				return a.failed(ctx, err.Error())
+			}
+			if held.ObjectID == "" && held.Type == runtime.TypeUndefined {
+				// The page hid while the act waited: start again in the
+				// document that replaced it.
+				continue
 			}
 			if held.ObjectID == "" {
 				var problem string
@@ -552,25 +560,29 @@ func settled(timeout time.Duration) chromedp.Action {
 		deadline := within(ctx, timeout)
 		ctx, cancel := context.WithTimeout(ctx, timeout+10*time.Second)
 		defer cancel()
-		var busy []string
+		var state struct {
+			Busy []string `json:"busy"`
+			Left bool     `json:"left"`
+		}
 		for {
 			left := time.Until(deadline)
 			if left < time.Millisecond {
 				break
 			}
-			err := evaluate(ctx, actCall("settle", left.Milliseconds()), &busy)
-			if documentReplaced(err) {
+			state.Busy, state.Left = nil, false
+			err := evaluate(ctx, actCall("settle", left.Milliseconds()), &state)
+			if documentReplaced(err) || (err == nil && state.Left) {
 				continue
 			}
 			if err != nil {
 				return fmt.Errorf("wait for the page to settle: %w%s", err, snapshot(ctx))
 			}
-			if len(busy) == 0 {
+			if len(state.Busy) == 0 {
 				return nil
 			}
 			break
 		}
-		return fmt.Errorf("wait for the page to settle: still busy: %s%s", strings.Join(busy, "; "), snapshot(ctx))
+		return fmt.Errorf("wait for the page to settle: still busy: %s%s", strings.Join(state.Busy, "; "), snapshot(ctx))
 	})
 }
 

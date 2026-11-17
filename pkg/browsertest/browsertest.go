@@ -53,12 +53,13 @@
 // cancelling it at the end of the first step would close the page every
 // later step needs.
 //
-// An in-page poll is already bounded, but by its own separate 30s
-// default rather than by anything here, and its timeout names nothing:
-// not the expression, not the page. Poll is the wait to use — the same
-// bound, the expression in the error, the page's text after it. Where
-// a poll must carry a result out, PollFunction with PollTimeout keeps
-// at least the bound in step:
+// chromedp's in-page poll is bounded, but by its own separate 30s
+// default rather than by anything here, its timeout names nothing — not
+// the expression, not the page — and it can hang across a back/forward
+// cache restore (see poll). Poll is the wait to use — the same bound,
+// the expression in the error, the page's text after it. Where a poll
+// must carry a result out, PollFunction with PollTimeout keeps at least
+// the bound in step, on a page the test hasn't gone back to:
 //
 //	chromedp.PollFunction(expr, &result, browsertest.PollTimeout)
 //
@@ -279,13 +280,15 @@ func Step(what string, action chromedp.Action) chromedp.ActionFunc {
 	}
 }
 
-// Poll is chromedp.Poll under the package's bounds, for every wait a
-// test makes on the page's state. A stall names the expression that
-// never held and shows the page as the wait gave up — its location
-// and its visible text — because a poll's timeout says nothing about
-// the state it timed out in, and a wait that stalls only on the
-// builder is otherwise a guess at the desk: which of a test's dozen
-// polls, on a page showing what.
+// Poll waits, under the package's bounds, until expr holds in the page:
+// every wait a test makes on the page's state. expr is a JavaScript
+// expression over the page's globals; a promise it yields is awaited,
+// and a throw ends the wait with its message. A stall names the
+// expression that never held and shows the page as the wait gave up —
+// its location and its visible text — because a poll's timeout says
+// nothing about the state it timed out in, and a wait that stalls only
+// on the builder is otherwise a guess at the desk: which of a test's
+// dozen polls, on a page showing what.
 func Poll(expr string) chromedp.Action {
 	return poll(expr, StepTimeout)
 }
@@ -300,40 +303,101 @@ const pageSnapshot = `(() => {
 
 // poll is Poll with its bound exposed, so a test of the stall itself
 // needn't wait out StepTimeout. The bound is the in-page one, which
-// reports chromedp.ErrPollingTimeout; Step's context bound around it
-// is the backstop for a page that stops answering at all.
+// reports chromedp.ErrPollingTimeout, set a little inside the caller's
+// own deadline as an act's is (within), so the wait says what never
+// held rather than leaving a bare deadline to; a context bound a little
+// beyond it is the backstop for a page that stops answering at all.
 //
 // A wait outlasts the page it started on. A poll runs in the page, so
 // a document replaced while it runs — a redirect that lands after
-// Navigate has returned, a page that moves itself on — takes the poll
-// with it, and chromedp reports the old document's going as the poll's
-// failure. The wait is for the page the test is going to, so it starts
-// again in the new document, inside the same bound.
+// Navigate has returned, a page that moves itself on, a back navigation
+// to a page the browser kept in its back/forward cache — takes the
+// poll's evaluation with it, which Chrome fails. The wait is for the
+// page the test is going to, so it starts again in the new document,
+// inside the same bound; the loop it left stops at its page's pagehide,
+// so a cached page brought back later doesn't resume it.
+//
+// It is not chromedp.Poll. That one evaluates in the document chromedp
+// believes current, after waiting for a DOM root chromedp learns only
+// from DOM.documentUpdated; a page restored from the back/forward cache
+// delivers that event before Page.frameNavigated, which replaces the
+// frame chromedp just gave the root to with one that has none, and the
+// poll then waits for a root that never comes, until its context dies
+// (CI run 2658). Runtime.evaluate with no context named runs in the
+// live document, which is where every act already runs.
 func poll(expr string, timeout time.Duration) chromedp.Action {
 	return chromedp.ActionFunc(func(ctx context.Context) error {
-		deadline := time.Now().Add(timeout)
-		// chromedp sends the timeout in whole milliseconds and reads zero
-		// as none, so less than one left is none left.
+		deadline := within(ctx, timeout)
+		ctx, cancel := context.WithTimeout(ctx, timeout+10*time.Second)
+		defer cancel()
 		err := fmt.Errorf("wait for %s: %w", expr, chromedp.ErrPollingTimeout)
-		for time.Until(deadline) >= time.Millisecond {
-			err = Step("wait for "+expr, chromedp.Poll(expr, nil, chromedp.WithPollingTimeout(time.Until(deadline)))).Do(ctx)
-			if err == nil {
-				return nil
-			}
-			if !documentReplaced(err) || ctx.Err() != nil {
+		for {
+			left := time.Until(deadline)
+			if left < time.Millisecond {
 				break
 			}
+			var outcome pollOutcome
+			e := evaluate(ctx, pollScript(expr, left), &outcome)
+			if documentReplaced(e) || (e == nil && outcome.Left) {
+				continue
+			}
+			switch {
+			case e != nil:
+				err = fmt.Errorf("wait for %s: %w", expr, e)
+			case outcome.Held:
+				return nil
+			case outcome.Thrown != nil:
+				err = fmt.Errorf("wait for %s: %s", expr, *outcome.Thrown)
+			}
+			break
 		}
-		// Read on the caller's context, the step's being spent, and
-		// briefly: a page that cannot answer is itself the finding.
-		snap, cancel := context.WithTimeout(ctx, 10*time.Second)
-		defer cancel()
-		var page string
-		if e := chromedp.Evaluate(pageSnapshot, &page).Do(snap); e != nil {
-			return fmt.Errorf("%w (page unread: %v)", err, e)
-		}
-		return fmt.Errorf("%w\npage: %s", err, page)
+		// Read briefly: a page that cannot answer is itself the finding.
+		return fmt.Errorf("%w%s", err, snapshot(ctx))
 	})
+}
+
+// pollOutcome is what pollScript's promise settles to.
+type pollOutcome struct {
+	Held   bool    `json:"held"`
+	Left   bool    `json:"left"`
+	Thrown *string `json:"thrown,omitzero"`
+}
+
+// pollScript is the in-page wait for expr, up to timeout: a promise
+// that settles once expr holds (a promise expr yields is awaited, as
+// chromedp's poll awaits one), once the time is up, once checking it
+// throws, or once the page hides, when the loop stops for good (see
+// act.js's wait). expr is an argument's body at the script's top
+// level, so it sees the page's globals and nothing of the wait's.
+func pollScript(expr string, timeout time.Duration) string {
+	return `((check, ms) => new Promise((done) => {
+	const deadline = performance.now() + ms;
+	let timer = 0;
+	let over = false;
+	const end = (outcome) => {
+		if (over) return;
+		over = true;
+		clearTimeout(timer);
+		removeEventListener("pagehide", left);
+		done(outcome);
+	};
+	const left = () => end({ left: true });
+	addEventListener("pagehide", left);
+	const look = async () => {
+		let held;
+		try {
+			held = await check();
+		} catch (e) {
+			end({ thrown: String(e?.message ?? e) });
+			return;
+		}
+		if (over) return;
+		if (held) end({ held: true });
+		else if (performance.now() >= deadline) end({});
+		else timer = setTimeout(look, 16);
+	};
+	look();
+}))(async () => (` + expr + `), ` + fmt.Sprint(timeout.Milliseconds()) + `)`
 }
 
 // documentReplaced says whether err is the page's document going away

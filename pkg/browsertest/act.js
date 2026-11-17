@@ -214,6 +214,37 @@
 	};
 	for (const type of ["pointerdown", "mousedown"]) addEventListener(type, pressed);
 
+	// wait runs a loop of looks until one settles it, and ends it when
+	// the page hides. Chrome fails an evaluation still pending in a page
+	// the tab leaves, so the act that awaited it starts again where the
+	// test went; but a page kept in the back/forward cache keeps its
+	// timers, and coming back (forward) would resume a loop no one awaits
+	// — an act's readiness setting, focusing or arming things in a page
+	// the test never asked it of. So the loop stops at pagehide, and its
+	// listener goes on every exit. look(step) is called again after each
+	// step.again(); step.done and step.fail settle it.
+	const wait = (look) => new Promise((done, fail) => {
+		let timer = 0;
+		let over = false;
+		const end = () => {
+			over = true;
+			clearTimeout(timer);
+			removeEventListener("pagehide", left);
+		};
+		const left = () => {
+			end();
+			done({ left: true });
+		};
+		addEventListener("pagehide", left);
+		const step = {
+			done: (v) => { if (!over) { end(); done(v); } },
+			fail: (e) => { if (!over) { end(); fail(e); } },
+			again: () => { if (!over) timer = setTimeout(run, 16); },
+		};
+		const run = () => { if (!over) look(step); };
+		run();
+	});
+
 	const lib = {
 		describe,
 		resolve,
@@ -225,26 +256,17 @@
 		// check and the act's start.
 		ready(sel, o, ms) {
 			const deadline = performance.now() + ms;
-			return new Promise((done, fail) => {
-				const look = () => {
-					let why;
-					try {
-						why = lib.attempt(sel, o);
-					} catch (e) {
-						fail(e);
-						return;
-					}
-					if (typeof why !== "string") {
-						done(why);
-						return;
-					}
-					if (performance.now() >= deadline) {
-						done({ problem: `${named(sel, o)} ${why}` });
-						return;
-					}
-					setTimeout(look, 16);
-				};
-				look();
+			return wait((step) => {
+				let why;
+				try {
+					why = lib.attempt(sel, o);
+				} catch (e) {
+					step.fail(e);
+					return;
+				}
+				if (typeof why !== "string") step.done(why);
+				else if (performance.now() >= deadline) step.done({ problem: `${named(sel, o)} ${why}` });
+				else step.again();
 			});
 		},
 
@@ -330,7 +352,14 @@
 			const pointer = a.kind === "pointer";
 			const until = performance.now() + 2000;
 			const waiting = () => pointer && a.verdict === "" && !a.clicked && a.pressed?.isConnected;
-			while (waiting() && performance.now() < until) await new Promise((r) => setTimeout(r, 16));
+			const waited = await wait((step) => {
+				if (waiting() && performance.now() < until) step.again();
+				else step.done({});
+			});
+			if (waited.left) {
+				if (armed === a) armed = null;
+				return { outcome: "elsewhere" };
+			}
 			if (armed === a) armed = null;
 			if (a.verdict === null) return { outcome: "nothing", why: "nothing arrived" };
 			if (a.verdict !== "") return { outcome: "refused", why: a.verdict };
@@ -341,17 +370,14 @@
 		},
 
 		// settle waits up to ms for the page to settle, and says what
-		// still keeps it busy if it does not.
+		// still keeps it busy if it does not, or that the page left.
 		settle(ms) {
 			const deadline = performance.now() + ms;
 			const settled = () => document.readyState === "complete" && !document.querySelector('[aria-busy="true"]');
-			return new Promise((done) => {
-				const look = () => {
-					if (settled()) done([]);
-					else if (performance.now() >= deadline) done(lib.busy());
-					else setTimeout(look, 16);
-				};
-				look();
+			return wait((step) => {
+				if (settled()) step.done({ busy: [] });
+				else if (performance.now() >= deadline) step.done({ busy: lib.busy() });
+				else step.again();
 			});
 		},
 
