@@ -222,9 +222,8 @@ func navigateReady(t *testing.T, ctx context.Context, target string) {
 	t.Helper()
 	if err := chromedp.Run(ctx,
 		chromedp.EmulateViewport(1440, 1000),
-		browsertest.Step("open "+target, chromedp.Navigate(target)),
-		chromedp.Poll(`document.querySelectorAll("monks-datagrid[data-dg-ready]").length === 5`, nil,
-			browsertest.PollTimeout),
+		browsertest.Open(target),
+		browsertest.Poll(`document.querySelectorAll("monks-datagrid[data-dg-ready]").length === 5`),
 	); err != nil {
 		t.Fatalf("open datagrid fixture: %v", err)
 	}
@@ -362,8 +361,8 @@ func TestBrowserOpenFacetDismissal(t *testing.T) {
 		Filters []string `json:"filters"`
 	}
 	if err := chromedp.Run(ctx,
-		browsertest.Step("open the team facet", chromedp.Click(`#people details[data-dg-filter-column="team"] > summary`, chromedp.ByQuery)),
-		browsertest.Step("check Navy in the team facet", chromedp.Click(`#people details[data-dg-filter-column="team"] label[data-dg-filter-value="Navy"]`, chromedp.ByQuery)),
+		browsertest.Step("open the team facet", browsertest.Click(`#people details[data-dg-filter-column="team"] > summary`)),
+		browsertest.Step("check Navy in the team facet", browsertest.Click(`#people details[data-dg-filter-column="team"] label[data-dg-filter-value="Navy"]`)),
 		chromedp.Evaluate(`({
 			open: `+openColumns+`,
 			filters: document.querySelector('#people').getState().filters.team || [],
@@ -377,7 +376,7 @@ func TestBrowserOpenFacetDismissal(t *testing.T) {
 
 	var afterOutside []string
 	if err := chromedp.Run(ctx,
-		browsertest.Step("press outside the grid", chromedp.Click(`h1`, chromedp.ByQuery)),
+		browsertest.Step("press outside the grid", browsertest.Click(`h1`)),
 		chromedp.Evaluate(openColumns, &afterOutside),
 	); err != nil {
 		t.Fatal(err)
@@ -393,8 +392,8 @@ func TestBrowserOpenFacetDismissal(t *testing.T) {
 		Compact []string `json:"compact"`
 	}
 	if err := chromedp.Run(ctx,
-		browsertest.Step("reopen the team facet", chromedp.Click(`#people details[data-dg-filter-column="team"] > summary`, chromedp.ByQuery)),
-		browsertest.Step("open the second grid's city facet", chromedp.Click(`#compact details[data-dg-filter-column="city"] > summary`, chromedp.ByQuery)),
+		browsertest.Step("reopen the team facet", browsertest.Click(`#people details[data-dg-filter-column="team"] > summary`)),
+		browsertest.Step("open the second grid's city facet", browsertest.Click(`#compact details[data-dg-filter-column="city"] > summary`)),
 		chromedp.Evaluate(`({
 			people: `+openColumns+`,
 			compact: [...document.querySelectorAll('#compact details[data-dg-filter-column][open]')]
@@ -413,16 +412,15 @@ func TestBrowserOpenFacetDismissal(t *testing.T) {
 		First  []string `json:"first"`
 		Second []string `json:"second"`
 	}
-	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
-		const grid = document.querySelector('#people');
-		const summary = (column) => grid.querySelector(
-			'details[data-dg-filter-column="' + column + '"] > summary',
-		);
-		summary('tags').click();
-		const first = `+openColumns+`;
-		summary('city').click();
-		return {first, second: `+openColumns+`};
-	})()`, &afterKeyboardOpen)); err != nil {
+	summary := func(column string) string {
+		return `#people details[data-dg-filter-column="` + column + `"] > summary`
+	}
+	if err := chromedp.Run(ctx,
+		browsertest.Step("open the tags facet from the keyboard", browsertest.Press(summary("tags"), kb.Enter)),
+		chromedp.Evaluate(openColumns, &afterKeyboardOpen.First),
+		browsertest.Step("open the city facet from the keyboard", browsertest.Press(summary("city"), kb.Enter)),
+		chromedp.Evaluate(openColumns, &afterKeyboardOpen.Second),
+	); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Equal(afterKeyboardOpen.First, []string{"tags"}) || !slices.Equal(afterKeyboardOpen.Second, []string{"city"}) {
@@ -437,8 +435,7 @@ func TestBrowserOpenFacetDismissal(t *testing.T) {
 		FocusedIsToggle bool     `json:"focusedIsToggle"`
 	}
 	if err := chromedp.Run(ctx,
-		browsertest.Step("focus the city facet's search field", chromedp.Focus(`#people details[data-dg-filter-column="city"] [data-dg-role="filter-search"]`, chromedp.ByQuery)),
-		chromedp.KeyEvent(kb.Escape),
+		browsertest.Step("press Escape in the city facet's search field", browsertest.Press(`#people details[data-dg-filter-column="city"] [data-dg-role="filter-search"]`, kb.Escape)),
 		chromedp.Evaluate(`({
 			open: `+openColumns+`,
 			focusedColumn: document.activeElement?.closest('details[data-dg-filter-column]')?.dataset.dgFilterColumn || '',
@@ -508,9 +505,9 @@ func TestBrowserFacetSelectionsShareOneColumn(t *testing.T) {
 	// A selection wider than "All" still ends in the same column.
 	var mixed []edge
 	if err := chromedp.Run(ctx,
-		browsertest.Step("open the team facet", chromedp.Click(`#people details[data-dg-filter-column="team"] > summary`, chromedp.ByQuery)),
-		browsertest.Step("check Research in the team facet", chromedp.Click(`#people details[data-dg-filter-column="team"] label[data-dg-filter-value="Research"]`, chromedp.ByQuery)),
-		browsertest.Step("press outside the grid", chromedp.Click(`h1`, chromedp.ByQuery)),
+		browsertest.Step("open the team facet", browsertest.Click(`#people details[data-dg-filter-column="team"] > summary`)),
+		browsertest.Step("check Research in the team facet", browsertest.Click(`#people details[data-dg-filter-column="team"] label[data-dg-filter-value="Research"]`)),
+		browsertest.Step("press outside the grid", browsertest.Click(`h1`)),
 		chromedp.Evaluate(measure, &mixed),
 	); err != nil {
 		t.Fatal(err)
@@ -558,9 +555,8 @@ func TestBrowserOpenFilterDropdownPaintsOverFollowingGrid(t *testing.T) {
 	ctx := browsertest.NewBrowser(t)
 	if err := chromedp.Run(ctx,
 		chromedp.EmulateViewport(1440, 1000),
-		browsertest.Step("open the stacked-grids fixture", chromedp.Navigate(server.URL+"/")),
-		chromedp.Poll(`document.querySelectorAll("monks-datagrid[data-dg-ready]").length === 2`, nil,
-			browsertest.PollTimeout),
+		browsertest.Open(server.URL+"/"),
+		browsertest.Poll(`document.querySelectorAll("monks-datagrid[data-dg-ready]").length === 2`),
 	); err != nil {
 		t.Fatalf("open stacked-grids fixture: %v", err)
 	}
@@ -641,7 +637,7 @@ func TestBrowserInteractionsPreserveRowsURLAndGridIsolation(t *testing.T) {
 			window.datagridProbeConnected = 0;
 			window.datagridProbeDisconnected = 0;
 		})()`, nil),
-		browsertest.Step("sort by score", chromedp.Click(`#people th[data-dg-column="score"] [data-dg-role="sort"]`, chromedp.ByQuery)),
+		browsertest.Step("sort by score", browsertest.Click(`#people th[data-dg-column="score"] [data-dg-role="sort"]`)),
 		chromedp.Evaluate(`({
 			first: document.querySelector('#people tr[data-dg-row]:not([hidden])').dataset.dgRowId,
 			aria: document.querySelector('#people th[data-dg-column="score"]').getAttribute('aria-sort'),
@@ -655,27 +651,27 @@ func TestBrowserInteractionsPreserveRowsURLAndGridIsolation(t *testing.T) {
 		t.Fatalf("sorted state = %#v", sorted)
 	}
 
-	var cycle struct {
-		DescendingFirst string `json:"descendingFirst"`
-		DescendingAria  string `json:"descendingAria"`
-		RestoredFirst   string `json:"restoredFirst"`
-		RestoredAria    string `json:"restoredAria"`
+	type sortStep struct {
+		First string `json:"first"`
+		Aria  string `json:"aria"`
 	}
-	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
-		const button = document.querySelector('#people th[data-dg-column="score"] [data-dg-role="sort"]');
-		button.click();
-		const descendingFirst = document.querySelector('#people tr[data-dg-row]:not([hidden])').dataset.dgRowId;
-		const descendingAria = button.closest('th').getAttribute('aria-sort');
-		button.click();
-		const restoredFirst = document.querySelector('#people tr[data-dg-row]:not([hidden])').dataset.dgRowId;
-		const restoredAria = button.closest('th').getAttribute('aria-sort') || '';
-		button.click();
-		return {descendingFirst, descendingAria, restoredFirst, restoredAria};
-	})()`, &cycle)); err != nil {
+	var descending, restored sortStep
+	scoreSort := `#people th[data-dg-column="score"] [data-dg-role="sort"]`
+	readSort := `({
+		first: document.querySelector('#people tr[data-dg-row]:not([hidden])').dataset.dgRowId,
+		aria: document.querySelector('#people th[data-dg-column="score"]').getAttribute('aria-sort') || '',
+	})`
+	if err := chromedp.Run(ctx,
+		browsertest.Step("sort by score descending", browsertest.Click(scoreSort)),
+		chromedp.Evaluate(readSort, &descending),
+		browsertest.Step("clear the score sort", browsertest.Click(scoreSort)),
+		chromedp.Evaluate(readSort, &restored),
+		browsertest.Step("sort by score again", browsertest.Click(scoreSort)),
+	); err != nil {
 		t.Fatal(err)
 	}
-	if cycle.DescendingFirst != "person-07" || cycle.DescendingAria != "descending" || cycle.RestoredFirst != "person-00" || cycle.RestoredAria != "" {
-		t.Fatalf("three-state sort cycle = %#v", cycle)
+	if descending.First != "person-07" || descending.Aria != "descending" || restored.First != "person-00" || restored.Aria != "" {
+		t.Fatalf("three-state sort cycle = descending %#v, restored %#v", descending, restored)
 	}
 	for _, fragment := range []string{"keep=yes", "dg.compact.search=hopper", "dg.people.sort=score", "dg.people.dir=asc"} {
 		if !strings.Contains(sorted.URL, fragment) {
@@ -693,9 +689,8 @@ func TestBrowserInteractionsPreserveRowsURLAndGridIsolation(t *testing.T) {
 			window.datagridProbeConnected = 0;
 			window.datagridProbeDisconnected = 0;
 		})()`, nil),
-		chromedp.Evaluate(`(() => { const input = document.querySelector('#people-search'); input.value = 'jose'; input.dispatchEvent(new Event('input', {bubbles:true})); })()`, nil),
-		chromedp.Poll(`document.querySelectorAll('#people tr[data-dg-row]:not([hidden])').length === 1`, nil,
-			browsertest.PollTimeout),
+		browsertest.Fill(`#people-search`, "jose"),
+		browsertest.Poll(`document.querySelectorAll('#people tr[data-dg-row]:not([hidden])').length === 1`),
 		chromedp.Evaluate(`({
 			visible: [...document.querySelectorAll('#people tr[data-dg-row]:not([hidden])')].map(r => r.dataset.dgRowId),
 			url: location.href,
@@ -916,13 +911,12 @@ func TestBrowserCallerOwnedBodyRowHeaderCannotInventColumn(t *testing.T) {
 	}
 	if err := chromedp.Run(ctx,
 		chromedp.EmulateViewport(900, 700),
-		browsertest.Step("open the caller-owned row-header fixture", chromedp.Navigate(server.URL)),
-		chromedp.Poll(`document.querySelector('#caller-owned-row-header')?.hasAttribute('data-dg-ready')`, nil,
-			browsertest.PollTimeout),
+		browsertest.Open(server.URL),
+		browsertest.Poll(`document.querySelector('#caller-owned-row-header')?.hasAttribute('data-dg-ready')`),
+		chromedp.Evaluate(`void document.querySelector('#caller-owned-row-header').setState({sort:'body-only', filters:{'body-only':['Alpha']}}, {updateURL:false})`, nil),
+		browsertest.Step("press a body row header's sort control", browsertest.Click(`#caller-owned-row-header tbody [data-dg-role="sort"]`)),
 		chromedp.Evaluate(`(() => {
 			const grid = document.querySelector('#caller-owned-row-header');
-			grid.setState({sort:'body-only', filters:{'body-only':['Alpha']}}, {updateURL:false});
-			grid.querySelector('tbody [data-dg-role="sort"]').click();
 			const state = grid.getState();
 			const rowHeader = grid.querySelector('tbody th[data-dg-column="body-only"]');
 			return {
@@ -1020,8 +1014,8 @@ func TestBrowserNoScriptEmptyStateMatchesInitialRows(t *testing.T) {
 	}
 	if err := chromedp.Run(ctx,
 		emulation.SetScriptExecutionDisabled(true),
-		browsertest.Step("open the no-script document", chromedp.Navigate(server.URL)),
-		browsertest.Step("the no-script document parses", chromedp.WaitReady("body", chromedp.ByQuery)),
+		// Open waits for the document to have loaded, so it has parsed.
+		browsertest.Open(server.URL),
 		chromedp.Evaluate(`(() => {
 			const empty = document.querySelector('#empty-grid [data-dg-role="empty"]');
 			const populated = document.querySelector('#populated-grid [data-dg-role="empty"]');
@@ -1064,23 +1058,23 @@ func TestBrowserGeneratedControlsHooksAndPopstate(t *testing.T) {
 		CompilersCount string   `json:"compilersCount"`
 		URL            string   `json:"url"`
 	}
-	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
-		const grid = document.querySelector('#people');
-		const checkbox = [...grid.querySelectorAll('input[data-dg-filter-column="team"]')]
-			.find(input => input.value === 'Research');
-		checkbox.checked = true;
-		checkbox.dispatchEvent(new Event('change', {bubbles:true}));
-		const count = value => grid.querySelector(
-			'label[data-dg-filter-value="' + value + '"] [data-dg-filter-count]'
-		)?.textContent || '';
-		return {
-			visible: [...grid.querySelectorAll('tr[data-dg-row]:not([hidden])')].map(row => row.dataset.dgRowId),
-			filter: grid.getState().filters.team,
-			typesCount: count('types'),
-			compilersCount: count('compilers'),
-			url: location.href,
-		};
-	})()`, &filtered)); err != nil {
+	if err := chromedp.Run(ctx,
+		browsertest.Step("open the team facet", browsertest.Click(`#people details[data-dg-filter-column="team"] > summary`)),
+		browsertest.Step("check Research in the team facet", browsertest.Click(`#people details[data-dg-filter-column="team"] label[data-dg-filter-value="Research"]`)),
+		chromedp.Evaluate(`(() => {
+			const grid = document.querySelector('#people');
+			const count = value => grid.querySelector(
+				'label[data-dg-filter-value="' + value + '"] [data-dg-filter-count]'
+			)?.textContent || '';
+			return {
+				visible: [...grid.querySelectorAll('tr[data-dg-row]:not([hidden])')].map(row => row.dataset.dgRowId),
+				filter: grid.getState().filters.team,
+				typesCount: count('types'),
+				compilersCount: count('compilers'),
+				url: location.href,
+			};
+		})()`, &filtered),
+	); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Equal(filtered.Visible, []string{"person-00", "person-03", "person-06", "person-09", "person-12"}) ||
@@ -1090,14 +1084,14 @@ func TestBrowserGeneratedControlsHooksAndPopstate(t *testing.T) {
 	}
 
 	var typeahead []string
-	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
-		const city = document.querySelector('#people details[data-dg-filter-column="city"]');
-		const input = city.querySelector('[data-dg-role="filter-search"]');
-		input.value = 'sao';
-		input.dispatchEvent(new Event('input', {bubbles:true}));
-		return [...city.querySelectorAll('label[data-dg-filter-value]:not([hidden]) .datagrid-filter-option-label')]
-			.map(label => label.textContent);
-	})()`, &typeahead)); err != nil {
+	if err := chromedp.Run(ctx,
+		// The open team facet paints over the city facet's summary.
+		browsertest.Step("press outside the grid", browsertest.Click(`h1`)),
+		browsertest.Step("open the city facet", browsertest.Click(`#people details[data-dg-filter-column="city"] > summary`)),
+		browsertest.Type(`#people details[data-dg-filter-column="city"] [data-dg-role="filter-search"]`, "sao"),
+		chromedp.Evaluate(`[...document.querySelectorAll('#people details[data-dg-filter-column="city"] label[data-dg-filter-value]:not([hidden]) .datagrid-filter-option-label')]
+			.map(label => label.textContent)`, &typeahead),
+	); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Equal(typeahead, []string{"São Paulo"}) {
@@ -1105,11 +1099,10 @@ func TestBrowserGeneratedControlsHooksAndPopstate(t *testing.T) {
 	}
 
 	var cleared State
-	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
-		const grid = document.querySelector('#people');
-		grid.querySelector('[data-dg-role="clear"]').click();
-		return grid.getState();
-	})()`, &cleared)); err != nil {
+	if err := chromedp.Run(ctx,
+		browsertest.Step("press Reset", browsertest.Click(`#people [data-dg-role="clear"]`)),
+		chromedp.Evaluate(`document.querySelector('#people').getState()`, &cleared),
+	); err != nil {
 		t.Fatal(err)
 	}
 	if !statesEqual(cleared, State{Filters: map[string][]string{}, Page: 1}) {
@@ -1120,17 +1113,14 @@ func TestBrowserGeneratedControlsHooksAndPopstate(t *testing.T) {
 		Page          int    `json:"page"`
 		FocusedAction string `json:"focusedAction"`
 	}
-	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
-		const grid = document.querySelector('#people');
-		grid.reset();
-		const next = grid.querySelector('[data-dg-page-action="next"]');
-		next.focus();
-		next.click();
-		return {
-			page: grid.getState().page,
+	if err := chromedp.Run(ctx,
+		chromedp.Evaluate(`void document.querySelector('#people').reset()`, nil),
+		browsertest.Step("press Enter on the next page control", browsertest.Press(`#people [data-dg-page-action="next"]`, kb.Enter)),
+		chromedp.Evaluate(`({
+			page: document.querySelector('#people').getState().page,
 			focusedAction: document.activeElement?.getAttribute('data-dg-page-action') || '',
-		};
-	})()`, &pager)); err != nil {
+		})`, &pager),
+	); err != nil {
 		t.Fatal(err)
 	}
 	if pager.Page != 2 || pager.FocusedAction != "next" {
@@ -1188,8 +1178,7 @@ func TestBrowserGeneratedControlsHooksAndPopstate(t *testing.T) {
 			history.pushState({}, '', '?keep=yes&dg.people.search=ada&dg.people.page=999&dg.compact.search=hopper');
 			window.dispatchEvent(new PopStateEvent('popstate'));
 		})()`, nil),
-		chromedp.Poll(`document.querySelector('#people').getState().search === 'ada'`, nil,
-			browsertest.PollTimeout),
+		browsertest.Poll(`document.querySelector('#people').getState().search === 'ada'`),
 		chromedp.Evaluate(`({
 			peopleSearch: document.querySelector('#people').getState().search,
 			peopleVisible: [...document.querySelectorAll('#people tr[data-dg-row]:not([hidden])')].map(row => row.dataset.dgRowId),
@@ -1246,34 +1235,33 @@ func TestBrowserRefreshPreservesGeneratedFilterInteraction(t *testing.T) {
 		SelectionEnd      int      `json:"selectionEnd"`
 		VisibleOptionText []string `json:"visibleOptionText"`
 	}
-	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
-		const grid = document.querySelector('#people');
-		const details = grid.querySelector('details[data-dg-filter-column="city"]');
-		details.open = true;
-		const input = details.querySelector('[data-dg-role="filter-search"]');
-		input.value = 'sao';
-		input.dispatchEvent(new Event('input', {bubbles:true}));
-		input.focus();
-		input.setSelectionRange(1, 3, 'backward');
+	if err := chromedp.Run(ctx,
+		browsertest.Step("open the city facet", browsertest.Click(`#people details[data-dg-filter-column="city"] > summary`)),
+		browsertest.Type(`#people details[data-dg-filter-column="city"] [data-dg-role="filter-search"]`, "sao"),
+		chromedp.Evaluate(`(() => {
+			const grid = document.querySelector('#people');
+			const input = grid.querySelector('details[data-dg-filter-column="city"] [data-dg-role="filter-search"]');
+			input.setSelectionRange(1, 3, 'backward');
 
-		const row = grid.querySelector('[data-dg-row-id="person-00"]').cloneNode(true);
-		row.dataset.dgRowId = 'refresh-interaction';
-		grid.querySelector('tbody').append(row);
-		grid.refresh();
+			const row = grid.querySelector('[data-dg-row-id="person-00"]').cloneNode(true);
+			row.dataset.dgRowId = 'refresh-interaction';
+			grid.querySelector('tbody').append(row);
+			grid.refresh();
 
-		const replacementDetails = grid.querySelector('details[data-dg-filter-column="city"]');
-		const replacement = replacementDetails.querySelector('[data-dg-role="filter-search"]');
-		return {
-			open: replacementDetails.open,
-			value: replacement.value,
-			focused: document.activeElement === replacement,
-			selectionStart: replacement.selectionStart,
-			selectionEnd: replacement.selectionEnd,
-			visibleOptionText: [...replacementDetails.querySelectorAll(
-				'label[data-dg-filter-value]:not([hidden]) .datagrid-filter-option-label',
-			)].map(label => label.textContent),
-		};
-	})()`, &got)); err != nil {
+			const replacementDetails = grid.querySelector('details[data-dg-filter-column="city"]');
+			const replacement = replacementDetails.querySelector('[data-dg-role="filter-search"]');
+			return {
+				open: replacementDetails.open,
+				value: replacement.value,
+				focused: document.activeElement === replacement,
+				selectionStart: replacement.selectionStart,
+				selectionEnd: replacement.selectionEnd,
+				visibleOptionText: [...replacementDetails.querySelectorAll(
+					'label[data-dg-filter-value]:not([hidden]) .datagrid-filter-option-label',
+				)].map(label => label.textContent),
+			};
+		})()`, &got),
+	); err != nil {
 		t.Fatal(err)
 	}
 	if !got.Open || got.Value != "sao" || !got.Focused || got.SelectionStart != 1 || got.SelectionEnd != 3 ||
@@ -1303,8 +1291,7 @@ func TestBrowserRefreshBeforeHydrationKeepsURLState(t *testing.T) {
 			window.refreshedBeforeHydration = !fresh.hasAttribute('data-dg-ready');
 			fresh.refresh();
 		})`, nil),
-		chromedp.Poll(`window.refreshedBeforeHydration !== undefined && !!document.querySelector('#people[data-dg-ready]')`, nil,
-			browsertest.PollTimeout),
+		browsertest.Poll(`window.refreshedBeforeHydration !== undefined && !!document.querySelector('#people[data-dg-ready]')`),
 		chromedp.Evaluate(`({
 			before: window.refreshedBeforeHydration,
 			search: document.querySelector('#people').getState().search,
@@ -1389,9 +1376,8 @@ func TestBrowserUselessFacetsAreSuppressed(t *testing.T) {
 	ctx := browsertest.NewBrowser(t)
 	if err := chromedp.Run(ctx,
 		chromedp.EmulateViewport(1200, 900),
-		browsertest.Step("open the facet-worthiness fixture", chromedp.Navigate(server.URL+"/?dg.roomy.filter.serial=serial-3&dg.tinyq.search=serial-3")),
-		chromedp.Poll(`document.querySelectorAll("monks-datagrid[data-dg-ready]").length === 4`, nil,
-			browsertest.PollTimeout),
+		browsertest.Open(server.URL+"/?dg.roomy.filter.serial=serial-3&dg.tinyq.search=serial-3"),
+		browsertest.Poll(`document.querySelectorAll("monks-datagrid[data-dg-ready]").length === 4`),
 	); err != nil {
 		t.Fatalf("open facet-worthiness fixture: %v", err)
 	}
@@ -1553,8 +1539,7 @@ func TestBrowserHandwrittenMetadataDefaultsAndNoHookHotPath(t *testing.T) {
 			document.body.append(textGrid);
 			window.datagridTextControl = textGrid;
 		})()`, nil),
-		chromedp.Poll(`window.datagridManual15?.hasAttribute('data-dg-ready') && window.datagridManual16?.hasAttribute('data-dg-ready') && window.datagridTextControl?.hasAttribute('data-dg-ready')`, nil,
-			browsertest.PollTimeout),
+		browsertest.Poll(`window.datagridManual15?.hasAttribute('data-dg-ready') && window.datagridManual16?.hasAttribute('data-dg-ready') && window.datagridTextControl?.hasAttribute('data-dg-ready')`),
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -1825,30 +1810,37 @@ func TestBrowserDefaultSortCycleRestoresInitialState(t *testing.T) {
 		Searched      snapshot `json:"searched"`
 		Cleared       snapshot `json:"cleared"`
 	}
-	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
-		const grid = document.querySelector('#ranked');
-		const snap = () => ({
-			first: grid.querySelector('tr[data-dg-row]:not([hidden])').dataset.dgRowId,
-			scoreAria: grid.querySelector('th[data-dg-column="score"]').getAttribute('aria-sort') || '',
-			nameAria: grid.querySelector('th[data-dg-column="name"]').getAttribute('aria-sort') || '',
-			nameLabel: grid.querySelector('th[data-dg-column="name"] [data-dg-role="sort"]').getAttribute('aria-label') || '',
-			clearHidden: grid.querySelector('[data-dg-role="clear"]').hidden,
-			query: window.location.search,
-		});
-		const click = (column) =>
-			grid.querySelector('th[data-dg-column="' + column + '"] [data-dg-role="sort"]').click();
-		const out = { initial: snap() };
-		click('score'); out.scoreToggled = snap();
-		click('score'); out.scoreRestored = snap();
-		click('name'); out.nameAsc = snap();
-		click('name'); out.nameDesc = snap();
-		click('name'); out.restored = snap();
-		grid.setState({...grid.getState(), search: 'ada'});
-		out.searched = snap();
-		grid.querySelector('[data-dg-role="clear"]').click();
-		out.cleared = snap();
-		return out;
-	})()`, &got)); err != nil {
+	snap := func(into *snapshot) chromedp.Action {
+		return chromedp.Evaluate(`(() => {
+			const grid = document.querySelector('#ranked');
+			return {
+				first: grid.querySelector('tr[data-dg-row]:not([hidden])').dataset.dgRowId,
+				scoreAria: grid.querySelector('th[data-dg-column="score"]').getAttribute('aria-sort') || '',
+				nameAria: grid.querySelector('th[data-dg-column="name"]').getAttribute('aria-sort') || '',
+				nameLabel: grid.querySelector('th[data-dg-column="name"] [data-dg-role="sort"]').getAttribute('aria-label') || '',
+				clearHidden: grid.querySelector('[data-dg-role="clear"]').hidden,
+				query: window.location.search,
+			};
+		})()`, into)
+	}
+	sortBy := func(column string) chromedp.Action {
+		return browsertest.Step("sort by "+column, browsertest.Click(`#ranked th[data-dg-column="`+column+`"] [data-dg-role="sort"]`))
+	}
+	if err := chromedp.Run(ctx,
+		snap(&got.Initial),
+		sortBy("score"), snap(&got.ScoreToggled),
+		sortBy("score"), snap(&got.ScoreRestored),
+		sortBy("name"), snap(&got.NameAsc),
+		sortBy("name"), snap(&got.NameDesc),
+		sortBy("name"), snap(&got.Restored),
+		chromedp.Evaluate(`(() => {
+			const grid = document.querySelector('#ranked');
+			grid.setState({...grid.getState(), search: 'ada'});
+		})()`, nil),
+		snap(&got.Searched),
+		browsertest.Step("press Reset", browsertest.Click(`#ranked [data-dg-role="clear"]`)),
+		snap(&got.Cleared),
+	); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1902,20 +1894,27 @@ func TestBrowserDefaultFilterIsTheResetBaseline(t *testing.T) {
 		Reset    snapshot `json:"reset"`
 		Label    string   `json:"label"`
 	}
-	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
-		const grid = document.querySelector('#scoped');
-		const snap = () => ({
-			rows: [...grid.querySelectorAll('tr[data-dg-row]:not([hidden])')].map(r => r.dataset.dgRowId),
-			clearHidden: grid.querySelector('[data-dg-role="clear"]').hidden,
-			query: window.location.search,
-		});
-		const out = { initial: snap(), label: grid.querySelector('[data-dg-role="clear"]').textContent.trim() };
-		grid.setState({...grid.getState(), filters: {team: ['Navy']}});
-		out.deviated = snap();
-		grid.querySelector('[data-dg-role="clear"]').click();
-		out.reset = snap();
-		return out;
-	})()`, &got)); err != nil {
+	snap := func(into *snapshot) chromedp.Action {
+		return chromedp.Evaluate(`(() => {
+			const grid = document.querySelector('#scoped');
+			return {
+				rows: [...grid.querySelectorAll('tr[data-dg-row]:not([hidden])')].map(r => r.dataset.dgRowId),
+				clearHidden: grid.querySelector('[data-dg-role="clear"]').hidden,
+				query: window.location.search,
+			};
+		})()`, into)
+	}
+	if err := chromedp.Run(ctx,
+		snap(&got.Initial),
+		chromedp.Evaluate(`document.querySelector('#scoped [data-dg-role="clear"]').textContent.trim()`, &got.Label),
+		chromedp.Evaluate(`(() => {
+			const grid = document.querySelector('#scoped');
+			grid.setState({...grid.getState(), filters: {team: ['Navy']}});
+		})()`, nil),
+		snap(&got.Deviated),
+		browsertest.Step("press Reset", browsertest.Click(`#scoped [data-dg-role="clear"]`)),
+		snap(&got.Reset),
+	); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2021,9 +2020,8 @@ func TestBrowserHostChromeCascade(t *testing.T) {
 	ctx := browsertest.NewBrowser(t)
 	if err := chromedp.Run(ctx,
 		chromedp.EmulateViewport(1440, 1000),
-		browsertest.Step("open cascade fixture", chromedp.Navigate(server.URL+"/")),
-		chromedp.Poll(`document.querySelectorAll("monks-datagrid[data-dg-ready]").length === 1`, nil,
-			browsertest.PollTimeout),
+		browsertest.Open(server.URL+"/"),
+		browsertest.Poll(`document.querySelectorAll("monks-datagrid[data-dg-ready]").length === 1`),
 	); err != nil {
 		t.Fatalf("open cascade fixture: %v", err)
 	}
