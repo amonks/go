@@ -17,14 +17,17 @@ import (
 // read — a button with no form to submit, a button that submits
 // nothing — fails nothing. The gate here stands in for pkg/confirm's
 // (which this module doesn't import) by doing what makes one live:
-// putting a submit listener on the window in the capture phase.
-// Carrying the gate's id is not enough: an empty script asks nothing,
-// and neither does one listening in the bubble phase.
+// putting a submit listener on the window in the capture phase, asked
+// for either way addEventListener takes it (true, or an options object
+// with capture set). Carrying the gate's id is not enough: an empty
+// script asks nothing, and neither does one listening in the bubble
+// phase. Nor is the listener: one some other script puts on the window
+// in the capture phase is not the gate.
 func TestAFormThatAsksNeedsTheGate(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		nonce := r.Header.Get(csp.NonceHeader)
 		gate := fmt.Sprintf(`<script id="monks-confirm-script" nonce="%s">window.addEventListener("submit", () => {}, true);</script>`, nonce)
-		inert := func(body string) string {
+		withGateID := func(body string) string {
 			return fmt.Sprintf(`<!doctype html><head><script id="monks-confirm-script" nonce="%s">%s</script></head>`, nonce, body) +
 				`<form method="post" data-confirm="Delete it?"><button>go</button></form>`
 		}
@@ -36,10 +39,15 @@ func TestAFormThatAsksNeedsTheGate(t *testing.T) {
 			fmt.Fprint(w, `<!doctype html><form method="post"><button data-confirm="Discard it?">go</button></form>`)
 		case "/gated":
 			fmt.Fprint(w, `<!doctype html><head>`+gate+`</head><form method="post" data-confirm="Delete it?"><button data-confirm="Discard it?">go</button></form>`)
+		case "/gated-options":
+			fmt.Fprint(w, withGateID(`window.addEventListener("submit", () => {}, {capture: true});`))
+		case "/impostor":
+			fmt.Fprintf(w, `<!doctype html><head><script nonce="%s">window.addEventListener("submit", () => {}, true);</script></head>`, nonce)
+			fmt.Fprint(w, `<form method="post" data-confirm="Delete it?"><button>go</button></form>`)
 		case "/empty":
-			fmt.Fprint(w, inert(""))
+			fmt.Fprint(w, withGateID(""))
 		case "/bubbling":
-			fmt.Fprint(w, inert(`window.addEventListener("submit", () => {});`))
+			fmt.Fprint(w, withGateID(`window.addEventListener("submit", () => {});`))
 		case "/others":
 			fmt.Fprint(w, `<!doctype html><button data-confirm="Restart?">outside any form</button>`+
 				`<form method="post" data-confirm=""><button type="button" data-confirm="Nothing?">submits nothing</button></form>`)
@@ -62,6 +70,8 @@ func TestAFormThatAsksNeedsTheGate(t *testing.T) {
 		{"a form's question", "/form", "Delete it?", false},
 		{"a button's question", "/button", "Discard it?", false},
 		{"under the gate", "/gated", "", false},
+		{"under the gate, its capture asked in an options object", "/gated-options", "", false},
+		{"under a capture listener from a script without the gate's id", "/impostor", "Delete it?", false},
 		{"under an empty script with the gate's id", "/empty", "Delete it?", false},
 		{"under a script with the gate's id listening too late", "/bubbling", "Delete it?", false},
 		{"what the gate doesn't read", "/others", "", false},
