@@ -565,3 +565,71 @@ func TestPollOutlastsABackForwardCacheRestore(t *testing.T) {
 		}
 	}
 }
+
+// TestPollWaitsThroughAPageBetweenStates: a page that replaces what a
+// poll reads in more than one task passes through moments the expression
+// can't be evaluated in — the element it reads gone for a while — and a
+// throw then is the page not being there yet, not the wait's end. A wait
+// that runs out says what its final check threw.
+func TestPollWaitsThroughAPageBetweenStates(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, Nonced(r, `<!doctype html><title>t</title><main><p class=prompt>old</p></main>
+<script nonce="`+FixtureNonce+`">
+// Gone for 200ms, then back with the text the test waits for.
+setTimeout(() => document.querySelector("main").replaceChildren(), 100);
+setTimeout(() => { const p = document.createElement("p"); p.className = "prompt"; p.textContent = "new"; document.querySelector("main").append(p); }, 300);
+</script>`))
+	}))
+	defer server.Close()
+
+	ctx := NewBrowser(t)
+	if err := chromedp.Run(ctx,
+		Open(server.URL),
+		Poll(`document.querySelector(".prompt").textContent === "new"`),
+	); err != nil {
+		t.Fatalf("a poll through a moment its element was gone: %v", err)
+	}
+	err := chromedp.Run(ctx, poll(`document.querySelector(".absent").textContent === "x"`, 300*time.Millisecond))
+	if err == nil || !errors.Is(err, chromedp.ErrPollingTimeout) || !strings.Contains(err.Error(), "Cannot read properties of null") {
+		t.Errorf("a poll whose expression always throws: %v, want a timeout saying what it threw", err)
+	}
+}
+
+// TestPollFollowsANavigationIntoADocumentStillParsing: a wait the page
+// navigates out from under starts again in the new document at once —
+// while its parser may still be held, here behind a stylesheet ahead of
+// an inline script, before it has reached <body>. What the expression
+// reads isn't there yet, and its throw is a check that didn't hold (CI
+// run 2660: agents' fork test polled .agent-prompt across the edit's
+// navigation into an opsui page, whose stylesheet heads its scripts).
+func TestPollFollowsANavigationIntoADocumentStillParsing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/slow.css":
+			// Long enough for the restarted wait's first checks to land
+			// in a document with no <body>.
+			time.Sleep(400 * time.Millisecond)
+			w.Header().Set("Content-Type", "text/css")
+			fmt.Fprint(w, "h1 { color: black }")
+		case "/b":
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprint(w, Nonced(r, `<!doctype html><title>b</title><link rel=stylesheet href="/slow.css">
+<script nonce="`+FixtureNonce+`">window.parsed = true;</script>
+<body><h1 class=prompt>new</h1></body>`))
+		default:
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprint(w, Nonced(r, `<!doctype html><title>a</title><h1 class=prompt>old</h1>
+<script nonce="`+FixtureNonce+`">setTimeout(() => { location = "/b"; }, 100);</script>`))
+		}
+	}))
+	defer server.Close()
+
+	ctx := NewBrowser(t)
+	if err := chromedp.Run(ctx,
+		Open(server.URL+"/a"),
+		Poll(`document.querySelector(".prompt").textContent === "new"`),
+	); err != nil {
+		t.Fatalf("a poll across a navigation into a document still parsing: %v", err)
+	}
+}

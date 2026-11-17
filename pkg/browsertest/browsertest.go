@@ -282,13 +282,16 @@ func Step(what string, action chromedp.Action) chromedp.ActionFunc {
 
 // Poll waits, under the package's bounds, until expr holds in the page:
 // every wait a test makes on the page's state. expr is a JavaScript
-// expression over the page's globals; a promise it yields is awaited,
-// and a throw ends the wait with its message. A stall names the
-// expression that never held and shows the page as the wait gave up —
-// its location and its visible text — because a poll's timeout says
-// nothing about the state it timed out in, and a wait that stalls only
-// on the builder is otherwise a guess at the desk: which of a test's
-// dozen polls, on a page showing what.
+// expression over the page's globals; a promise it yields is awaited.
+// A throw (or a rejection) counts as not yet — a wait restarted in a
+// new document can land while its parser is still short of what expr
+// reads, and a page replacing what expr reads can pass through moments
+// it can't be read in — and a wait that runs out says what its final
+// check threw. A stall names the expression that never held and shows
+// the page as the wait gave up — its location and its visible text —
+// because a poll's timeout says nothing about the state it timed out
+// in, and a wait that stalls only on the builder is otherwise a guess
+// at the desk: which of a test's dozen polls, on a page showing what.
 func Poll(expr string) chromedp.Action {
 	return poll(expr, StepTimeout)
 }
@@ -314,8 +317,10 @@ const pageSnapshot = `(() => {
 // to a page the browser kept in its back/forward cache — takes the
 // poll's evaluation with it, which Chrome fails. The wait is for the
 // page the test is going to, so it starts again in the new document,
-// inside the same bound; the loop it left stops at its page's pagehide,
-// so a cached page brought back later doesn't resume it.
+// inside the same bound — at once, so in a document its parser may not
+// have finished, which is why a throw is a check that didn't hold (CI
+// run 2660) — and the loop it left stops at its page's pagehide, so a
+// cached page brought back later doesn't resume it.
 //
 // It is not chromedp.Poll. That one evaluates in the document chromedp
 // believes current, after waiting for a DOM root chromedp learns only
@@ -347,7 +352,7 @@ func poll(expr string, timeout time.Duration) chromedp.Action {
 			case outcome.Held:
 				return nil
 			case outcome.Thrown != nil:
-				err = fmt.Errorf("wait for %s: %s", expr, *outcome.Thrown)
+				err = fmt.Errorf("wait for %s: %w (it last threw: %s)", expr, chromedp.ErrPollingTimeout, *outcome.Thrown)
 			}
 			break
 		}
@@ -365,10 +370,11 @@ type pollOutcome struct {
 
 // pollScript is the in-page wait for expr, up to timeout: a promise
 // that settles once expr holds (a promise expr yields is awaited, as
-// chromedp's poll awaits one), once the time is up, once checking it
-// throws, or once the page hides, when the loop stops for good (see
-// act.js's wait). expr is an argument's body at the script's top
-// level, so it sees the page's globals and nothing of the wait's.
+// chromedp's poll awaits one), once the time is up — with what its
+// final check threw, a throw being a check that didn't hold — or once
+// the page hides, when the loop stops for good (see act.js's wait).
+// expr is an argument's body at the script's top level, so it sees the
+// page's globals and nothing of the wait's.
 func pollScript(expr string, timeout time.Duration) string {
 	return `((check, ms) => new Promise((done) => {
 	const deadline = performance.now() + ms;
@@ -383,17 +389,18 @@ func pollScript(expr string, timeout time.Duration) string {
 	};
 	const left = () => end({ left: true });
 	addEventListener("pagehide", left);
+	let thrown;
 	const look = async () => {
-		let held;
+		let held = false;
 		try {
 			held = await check();
+			thrown = undefined;
 		} catch (e) {
-			end({ thrown: String(e?.message ?? e) });
-			return;
+			thrown = String(e?.message ?? e);
 		}
 		if (over) return;
 		if (held) end({ held: true });
-		else if (performance.now() >= deadline) end({});
+		else if (performance.now() >= deadline) end({ thrown });
 		else timer = setTimeout(look, 16);
 	};
 	look();
