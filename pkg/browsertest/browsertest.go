@@ -21,24 +21,32 @@
 // (data-confirm) without pkg/confirm's gate, which would post it
 // unasked; see gate.go.
 //
-// A suite's whole use of it is usually two calls:
+// A suite's whole use of it is usually a launch, an open, and acts:
 //
 //	ctx := browsertest.NewBrowser(t)
 //	err := chromedp.Run(ctx,
-//		browsertest.Step("open the dashboard", chromedp.Navigate(server.URL)),
-//		browsertest.Step("the table renders", chromedp.WaitVisible("#rows", chromedp.ByQuery)),
+//		browsertest.Open(server.URL),
+//		browsertest.Click(`#rows tr[data-id="7"] .edit`),
+//		browsertest.Type("#title", "Renamed"),
 //		browsertest.Poll(`document.querySelectorAll("#rows tr").length === 3`),
 //	)
 //
+// The acts (act.go) are how a suite touches a page, in place of
+// chromedp's node actions, which hold a node across round trips the page
+// can swap it in; Open and Settled wait out a page's first refresh. See
+// specs/pkg-browsertest.md for the flakes each answers.
+//
 // # Bound every waiting action
 //
-// chromedp's node queries (Click, WaitVisible, SendKeys, Focus) and
-// Navigate retry until their context dies, and nothing else bounds
-// them. An unbounded one therefore runs out the whole session budget
-// and reports "context deadline exceeded" without saying which wait
-// stalled, turning a fast, named failure into a slow, anonymous one
-// that takes every later subtest down with it. Step is the fix: it
-// caps one action at StepTimeout and names it in the error.
+// The acts, Poll and Settled bound and name themselves. chromedp's own
+// waiting actions — Navigate, and a raw gesture's events — retry until
+// their context dies, and nothing else bounds them. An unbounded one
+// therefore runs out the whole session budget and reports "context
+// deadline exceeded" without saying which wait stalled, turning a fast,
+// named failure into a slow, anonymous one that takes every later
+// subtest down with it. Step is the fix: it caps one action at
+// StepTimeout and names it in the error. An act inside a Step still
+// reports its own reason.
 //
 // The bound goes inside the action rather than around the Run, because
 // a Run on a derived context ties the browser target to that context —
@@ -73,10 +81,14 @@
 // # Clicking a measured coordinate
 //
 // Where a click must land on a coordinate rather than a node — a chart
-// bar, a brushed range — scrollIntoView first and assert
-// document.elementFromPoint hits the intended element before
-// dispatching. The builder draws a few pixels taller than a dev laptop,
-// and a click off the bottom of the viewport lands on nothing.
+// bar, a brushed range — ClickAt aims it at a fraction of an element's
+// box. A gesture the acts don't cover, a drag, is raw input: compute
+// each point in one evaluation as a whole pixel inside its target,
+// scrollIntoView first, and assert document.elementFromPoint hits the
+// target before dispatching. The builder draws a few pixels taller than
+// a dev laptop, a click off the bottom of the viewport lands on nothing,
+// and Chromium rounds a fractional coordinate into whichever pixel it
+// likes.
 package browsertest
 
 import (
@@ -89,11 +101,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 )
@@ -325,6 +339,9 @@ func poll(expr string, timeout time.Duration) chromedp.Action {
 // documentReplaced says whether err is the page's document going away
 // under a running evaluation, in each of the ways CDP says so.
 func documentReplaced(err error) bool {
+	if err == nil {
+		return false
+	}
 	msg := err.Error()
 	for _, gone := range []string{
 		"Inspected target navigated or closed",
@@ -470,6 +487,7 @@ func newBrowser(t *testing.T, cleanup func(func()), opts ...Option) (context.Con
 	flushGuard, stopGuard, guardErr := guardTab(t, ctx, cfg.failed)
 	if guardErr == nil {
 		cleanup(stopGuard)
+		guardErr = emulateTab(t, ctx)
 	}
 	cleanup(cancelBrowser)
 	cleanup(cancelBudget)
@@ -526,7 +544,62 @@ func NewTab(t *testing.T, ctx context.Context) context.Context {
 	}
 	t.Cleanup(stop)
 	t.Cleanup(flush)
+	if err := emulateTab(t, tab); err != nil {
+		t.Fatal(err)
+	}
 	return tab
+}
+
+// ThrottleEnv names the environment variable that slows every page a
+// suite drives: its value is a CPU slowdown factor, which each tab
+// applies to its renderer through CDP's Emulation.setCPUThrottlingRate.
+// A suite that passes on a quick laptop and fails on a loaded CI builder
+// is usually racing something the page does on its own clock — a first
+// refresh, a debounce, a layout — and the builder is the slow machine
+// that loses the race. Throttling makes the laptop that machine:
+//
+//	BROWSERTEST_CPU_THROTTLE=6 go test -run TestX -count=20 ./...
+//
+// is how a suite is shaken before it lands rather than on main. Unset,
+// or 1, leaves the page at the machine's speed.
+const ThrottleEnv = "BROWSERTEST_CPU_THROTTLE"
+
+// throttle reads ThrottleEnv: the slowdown factor, or 1 for none.
+func throttle() (float64, error) {
+	v := os.Getenv(ThrottleEnv)
+	if v == "" {
+		return 1, nil
+	}
+	rate, err := strconv.ParseFloat(v, 64)
+	if err != nil || rate < 1 {
+		return 0, fmt.Errorf("%s=%q: want a slowdown factor of 1 or more", ThrottleEnv, v)
+	}
+	return rate, nil
+}
+
+// emulateTab sets what every tab a suite drives emulates: a focused
+// window, and the CPU throttle ThrottleEnv asks for.
+//
+// A headless window has no focus to give: the page's document.hasFocus()
+// is false and focus moves without the window's focus events, so a page
+// that waits for focus — CodeMirror places its caret on one — behaves on
+// a builder as it does in no person's browser, and as it sometimes does
+// on a laptop (CI run 1193). Focus emulation gives every tab the focused
+// window a person's tab has.
+func emulateTab(t *testing.T, ctx context.Context) error {
+	rate, err := throttle()
+	if err != nil {
+		return err
+	}
+	actions := []chromedp.Action{emulation.SetFocusEmulationEnabled(true)}
+	if rate > 1 {
+		t.Logf("browsertest: pages run at 1/%g of the CPU (%s)", rate, ThrottleEnv)
+		actions = append(actions, emulation.SetCPUThrottlingRate(rate))
+	}
+	if err := chromedp.Run(ctx, actions...); err != nil {
+		return fmt.Errorf("emulating a focused window: %w", err)
+	}
+	return nil
 }
 
 // CaptureConsole routes console.log/warn/error and uncaught exceptions

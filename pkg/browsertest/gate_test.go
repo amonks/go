@@ -82,7 +82,7 @@ func TestAFormThatAsksNeedsTheGate(t *testing.T) {
 			ctx := NewBrowser(t, withFailures(c.add))
 			actions := []chromedp.Action{Step("load the page", chromedp.Navigate(server.URL+tc.path))}
 			if tc.click {
-				actions = append(actions, Step("submit the inserted form", chromedp.Click("#b", chromedp.ByQuery)))
+				actions = append(actions, Step("submit the inserted form", Click("#b")))
 			}
 			if err := chromedp.Run(ctx, actions...); err != nil {
 				t.Fatal(err)

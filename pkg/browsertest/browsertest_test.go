@@ -196,7 +196,7 @@ func TestNewBrowserDrivesAPage(t *testing.T) {
 	var greeting string
 	if err := chromedp.Run(ctx,
 		Step("open the page", chromedp.Navigate(server.URL)),
-		Step("read the greeting", chromedp.Text("#greeting", &greeting, chromedp.ByQuery)),
+		Step("read the greeting", Text("#greeting", &greeting)),
 	); err != nil {
 		t.Fatalf("driving the page: %v", err)
 	}
@@ -234,7 +234,7 @@ func TestNewBrowserResolvesOnlyLoopback(t *testing.T) {
 		var greeting string
 		if err := chromedp.Run(ctx,
 			Step("open "+origin, chromedp.Navigate(origin)),
-			Step("read the greeting", chromedp.Text("#greeting", &greeting, chromedp.ByQuery)),
+			Step("read the greeting", Text("#greeting", &greeting)),
 		); err != nil {
 			t.Fatalf("loopback at %s: %v", origin, err)
 		}
@@ -372,7 +372,7 @@ func TestNewTabDrivesASecondPage(t *testing.T) {
 		var who string
 		if err := chromedp.Run(tab.ctx,
 			Step("open the page", chromedp.Navigate(server.URL+tab.path)),
-			Step("read the path", chromedp.Text("#who", &who, chromedp.ByQuery)),
+			Step("read the path", Text("#who", &who)),
 		); err != nil {
 			t.Fatalf("%s tab: %v", tab.name, err)
 		}

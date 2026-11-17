@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chromedp/cdproto"
 	"github.com/chromedp/cdproto/fetch"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
@@ -266,7 +267,7 @@ func TestAnswerLeavesThePageGuarded(t *testing.T) {
 		Step("load a page", chromedp.Navigate(server.URL)),
 		Poll(`window.nonced === true`),
 		Step("follow a link off the machine", chromedp.Navigate("https://example.invalid/away")),
-		Step("read the answer", chromedp.Text("#answered", &text, chromedp.ByQuery)),
+		Step("read the answer", Text("#answered", &text)),
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -479,7 +480,7 @@ func TestServeAtAProductionOrigin(t *testing.T) {
 	ServeAt(t, ctx, "https://ss.example", handler)
 	if err := chromedp.Run(ctx,
 		Step("load the page at its production origin", chromedp.Navigate("https://ss.example/text/doc")),
-		Step("the form posts", chromedp.WaitVisible("#done", chromedp.ByQuery)),
+		Step("the form posts", Visible("#done")),
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -527,7 +528,7 @@ func TestARefusalAtTheEndOfATestIsCaught(t *testing.T) {
 				ctx := NewBrowser(t, withFailures(c.add))
 				actions := []chromedp.Action{Step("load the page", chromedp.Navigate(server.URL+tc.path))}
 				if tc.click {
-					actions = append(actions, Step("click", chromedp.Click("#b", chromedp.ByQuery)))
+					actions = append(actions, Step("click", Click("#b")))
 				}
 				if err := chromedp.Run(ctx, actions...); err != nil {
 					t.Fatal(err)
@@ -683,5 +684,21 @@ func TestNoncedServesAFixtureWithTheRequestsNonce(t *testing.T) {
 	r.Header.Set(csp.NonceHeader, "fresh")
 	if got, want := Nonced(r, page), `<script nonce="fresh">a()</script><script>b()</script>`; got != want {
 		t.Errorf("Nonced = %q, want %q", got, want)
+	}
+}
+
+// TestADroppedRequestIsNotAnUnguardedResponse: a response the browser
+// dropped while the guard read it — a navigation cancelling a favicon —
+// never reaches a page, so it is no failure of the guard's; any other
+// failure to read a response is.
+func TestADroppedRequestIsNotAnUnguardedResponse(t *testing.T) {
+	gone := &cdproto.Error{Code: -32602, Message: "Invalid InterceptionId."}
+	if !requestGone(gone) {
+		t.Errorf("%v reads as a request still there", gone)
+	}
+	for _, err := range []error{nil, &cdproto.Error{Code: -32000, Message: "Can only get response body on requests captured after headers received."}} {
+		if requestGone(err) {
+			t.Errorf("%v reads as a dropped request", err)
+		}
 	}
 }

@@ -333,7 +333,7 @@ func guardTab(t *testing.T, ctx context.Context, failed func(error)) (flush, sto
 		runtime.AddBinding(violationBinding),
 		runtime.AddBinding(gateBinding),
 		chromedp.ActionFunc(func(ctx context.Context) error {
-			for _, listener := range []string{violationListener, gateListener} {
+			for _, listener := range []string{violationListener, gateListener, actJS} {
 				if _, err := page.AddScriptToEvaluateOnNewDocument(listener).Do(ctx); err != nil {
 					return err
 				}
@@ -488,6 +488,12 @@ func (g *guard) respond(executor context.Context, event *fetch.EventRequestPause
 		nonce = rand.Text()
 	}
 	body, err := fetch.GetResponseBody(event.RequestID).Do(executor)
+	if requestGone(err) {
+		// The page went on before the guard read the response — a
+		// navigation cancels the favicon it was fetching — so the
+		// response goes nowhere, guarded or not.
+		return err
+	}
 	if err != nil {
 		// A redirect, a 204 or 304, a HEAD: nothing to run script in, and
 		// no body to fulfil the response from. Anything else would go to
@@ -507,6 +513,14 @@ func (g *guard) respond(executor context.Context, event *fetch.EventRequestPause
 		params = params.WithResponsePhrase(event.ResponseStatusText)
 	}
 	return params.Do(executor)
+}
+
+// requestGone says whether err is CDP's answer for a paused request the
+// browser has since dropped: the page navigated, or closed, while the
+// guard was reading it (pkg/improve's suite lost a run to a favicon
+// that way).
+func requestGone(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "Invalid InterceptionId")
 }
 
 // cspReport is the report-uri body: CSP Level 2's names, which every
