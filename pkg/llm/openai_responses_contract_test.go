@@ -173,10 +173,16 @@ func TestResponsesLocalValidationIsNotRetryable(t *testing.T) {
 	}
 }
 
-// GPT-6.1 Sol always reasons, like Astra; Terra takes none through max.
+// GPT-6.1 Sol and both GPT-6.2 models always reason, like Astra, taking
+// low through max; Terra takes none through max. The 6.2 pages say only
+// that the API rejects none, so their levels are the API's own answer
+// (2026-11-17): "Supported values are: 'low', 'medium', 'high', 'xhigh',
+// and 'max'."
 // https://developers.openai.com/api/docs/models/gpt-6.1-sol
 // https://developers.openai.com/api/docs/models/gpt-6.1-terra
-func TestResponsesGPT61SolAndTerra(t *testing.T) {
+// https://developers.openai.com/api/docs/models/gpt-6.2-astra
+// https://developers.openai.com/api/docs/models/gpt-6.2-sol
+func TestResponsesGPT61AndGPT62(t *testing.T) {
 	for _, tc := range []struct {
 		id      string
 		offOK   bool
@@ -184,6 +190,8 @@ func TestResponsesGPT61SolAndTerra(t *testing.T) {
 	}{
 		{"gpt-6.1-sol", false, []ThinkingLevel{ThinkingLow, ThinkingMedium, ThinkingHigh, ThinkingXHigh, ThinkingMax}},
 		{"gpt-6.1-terra", true, []ThinkingLevel{ThinkingOff, ThinkingLow, ThinkingMedium, ThinkingHigh, ThinkingXHigh, ThinkingMax}},
+		{"gpt-6.2-astra", false, []ThinkingLevel{ThinkingLow, ThinkingMedium, ThinkingHigh, ThinkingXHigh, ThinkingMax}},
+		{"gpt-6.2-sol", false, []ThinkingLevel{ThinkingLow, ThinkingMedium, ThinkingHigh, ThinkingXHigh, ThinkingMax}},
 	} {
 		t.Run(tc.id, func(t *testing.T) {
 			model := Model{ID: tc.id, API: APIOpenAIResponses}
