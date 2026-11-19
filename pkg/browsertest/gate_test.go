@@ -26,9 +26,9 @@ import (
 func TestAFormThatAsksNeedsTheGate(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		nonce := r.Header.Get(csp.NonceHeader)
-		gate := fmt.Sprintf(`<script id="monks-confirm-script" nonce="%s">window.addEventListener("submit", () => {}, true);</script>`, nonce)
+		gate := fmt.Sprintf(`<script id="confirm-gate-script" nonce="%s">window.addEventListener("submit", () => {}, true);</script>`, nonce)
 		withGateID := func(body string) string {
-			return fmt.Sprintf(`<!doctype html><head><script id="monks-confirm-script" nonce="%s">%s</script></head>`, nonce, body) +
+			return fmt.Sprintf(`<!doctype html><head><script id="confirm-gate-script" nonce="%s">%s</script></head>`, nonce, body) +
 				`<form method="post" data-confirm="Delete it?"><button>go</button></form>`
 		}
 		w.Header().Set("Content-Type", "text/html")

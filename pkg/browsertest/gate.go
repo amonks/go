@@ -8,7 +8,7 @@ import (
 // A form that asks before it submits says so with data-confirm, on the
 // form or on its submit button, and the fleet's one gate asks:
 // pkg/confirm's listener, rendered by the page's layout as the script
-// with id monks-confirm-script. A layout that renders such a form
+// with id confirm-gate-script. A layout that renders such a form
 // without the gate fails silently: nothing asks, the form just posts,
 // and no test of the page's own notices unless it set out to. So the
 // guard fails the test of any page that holds one without the gate:
@@ -38,7 +38,7 @@ type UngatedConfirm struct {
 
 // Error makes an UngatedConfirm the failure the guard reports.
 func (u UngatedConfirm) Error() string {
-	return fmt.Sprintf("browsertest: %s has a form that asks %q before it submits (data-confirm), but no live gate that asks it (pkg/confirm's #monks-confirm-script, its submit listener on the window): its layout renders confirm.Script() first in the head", u.Document, u.Question)
+	return fmt.Sprintf("browsertest: %s has a form that asks %q before it submits (data-confirm), but no live gate that asks it (pkg/confirm's #confirm-gate-script, its submit listener on the window): its layout renders confirm.Script() first in the head", u.Document, u.Question)
 }
 
 // gateBinding is the CDP binding gateListener reports a page through.
@@ -61,7 +61,7 @@ const gateListener = `(() => {
 		writable: true,
 		value: function addEventListener(type, listener, options) {
 			const script = document.currentScript;
-			if (this === window && type === "submit" && capturing(options) && script !== null && script.id === "monks-confirm-script") live = true;
+			if (this === window && type === "submit" && capturing(options) && script !== null && script.id === "confirm-gate-script") live = true;
 			return add.call(this, type, listener, options);
 		},
 	});
