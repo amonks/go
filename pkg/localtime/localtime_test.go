@@ -85,7 +85,7 @@ func TestFuncMapForHTMLTemplatePages(t *testing.T) {
 
 func TestScriptCarriesTheNonce(t *testing.T) {
 	got := render(t, templ.WithNonce(context.Background(), "n0nce"), Script())
-	if !strings.HasPrefix(got, `<script id="monks-localtime-script" nonce="n0nce">`) {
+	if !strings.HasPrefix(got, `<script id="local-time-script" nonce="n0nce">`) {
 		t.Fatalf("with nonce: %q", got[:50])
 	}
 	bare := render(t, context.Background(), Script())

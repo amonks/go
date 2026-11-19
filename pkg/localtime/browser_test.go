@@ -68,9 +68,9 @@ func TestBrowserRewritesStampsIntoTheViewersZone(t *testing.T) {
 		browsertest.Step("read the late stamp", chromedp.Poll(
 			`document.querySelector('#late time').textContent !== '2026-01-15 12:00 UTC' && document.querySelector('#late time').textContent`,
 			&late, browsertest.PollTimeout)),
-		browsertest.Step("format through the window", chromedp.Evaluate(`MonksLocalTime.format('2026-08-29T04:05:09Z', 'second')`, &formatted)),
-		browsertest.Step("read the zone", chromedp.Evaluate(`MonksLocalTime.zone()`, &zone)),
-		browsertest.Step("read the zone at a winter instant", chromedp.Evaluate(`MonksLocalTime.zone('2026-01-15T12:00:00Z')`, &winterZone)),
+		browsertest.Step("format through the window", chromedp.Evaluate(`window.localTime.format('2026-08-29T04:05:09Z', 'second')`, &formatted)),
+		browsertest.Step("read the zone", chromedp.Evaluate(`window.localTime.zone()`, &zone)),
+		browsertest.Step("read the zone at a winter instant", chromedp.Evaluate(`window.localTime.zone('2026-01-15T12:00:00Z')`, &winterZone)),
 	); err != nil {
 		t.Fatal(err)
 	}

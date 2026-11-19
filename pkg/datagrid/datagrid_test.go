@@ -101,7 +101,7 @@ func TestTableRendersSemanticRowsAndBehaviorMetadata(t *testing.T) {
 
 	got := renderComponent(t, Table(opts, rows))
 	for _, want := range []string{
-		`<monks-datagrid id="people"`,
+		`<data-grid id="people"`,
 		`data-dg-query-prefix="dg.people"`,
 		`data-dg-page-size="2"`,
 		`data-dg-typeahead-at="8"`,
@@ -564,7 +564,7 @@ func TestTablePanelAttribute(t *testing.T) {
 	if !strings.Contains(top, `data-dg-panel="top"`) {
 		t.Fatalf("PanelTop should stamp data-dg-panel on the host:\n%s", top)
 	}
-	if !strings.Contains(renderComponent(t, StyleForDocumentHead()), `monks-datagrid:not([data-dg-panel="top"]) .datagrid-panel`) {
+	if !strings.Contains(renderComponent(t, StyleForDocumentHead()), `data-grid:not([data-dg-panel="top"]) .datagrid-panel`) {
 		t.Fatal("the rail rules should yield to data-dg-panel=\"top\"")
 	}
 }
@@ -598,13 +598,13 @@ func TestGridPinsTextSizeAdjust(t *testing.T) {
 	var body string
 	for chunk := range strings.SplitSeq(css, "}") {
 		before, b, ok := strings.Cut(chunk, "{")
-		if ok && strings.TrimSpace(before) == "monks-datagrid" {
+		if ok && strings.TrimSpace(before) == "data-grid" {
 			body = b
 			break
 		}
 	}
 	if body == "" {
-		t.Fatal("stylesheet has no monks-datagrid root rule")
+		t.Fatal("stylesheet has no data-grid root rule")
 	}
 	if !strings.Contains(body, "-webkit-text-size-adjust: 100%") {
 		t.Error("grid root does not pin -webkit-text-size-adjust, so iOS autosizes wide cells")
@@ -624,7 +624,7 @@ func TestDocumentHeadComponentsInlineSelfContainedAssets(t *testing.T) {
 	if !strings.Contains(style, "<style") || !strings.Contains(style, "container-type: inline-size") || !strings.Contains(style, "@container") {
 		t.Fatalf("style component does not contain container-aware CSS:\n%s", style)
 	}
-	if !strings.Contains(script, "<script") || !strings.Contains(script, `customElements.define("monks-datagrid"`) {
+	if !strings.Contains(script, "<script") || !strings.Contains(script, `customElements.define("data-grid"`) {
 		t.Fatalf("script component does not define the web component:\n%s", script)
 	}
 	if !strings.Contains(head, style) || !strings.Contains(head, script) {

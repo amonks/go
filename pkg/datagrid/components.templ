@@ -11,12 +11,12 @@ templ Head() {
 
 // StyleForDocumentHead renders only the embedded stylesheet.
 templ StyleForDocumentHead() {
-	@templ.Raw("<style id=\"monks-datagrid-style\">" + stylesheet + "</style>")
+	@templ.Raw("<style id=\"data-grid-style\">" + stylesheet + "</style>")
 }
 
 // ScriptForDocumentHead renders only the embedded custom-element script.
 templ ScriptForDocumentHead() {
-	@templ.Raw("<script id=\"monks-datagrid-script\"" + nonceAttr(ctx) + ">" + javascript + "</script>")
+	@templ.Raw("<script id=\"data-grid-script\"" + nonceAttr(ctx) + ">" + javascript + "</script>")
 }
 
 // Shell renders the common controls, responsive frame, status, empty state,
@@ -24,7 +24,7 @@ templ ScriptForDocumentHead() {
 // callers that populate or render their own table.
 templ Shell(props ShellProps) {
 	{{ props = normalizeShellProps(props) }}
-	<monks-datagrid
+	<data-grid
 		id={ props.ID }
 		aria-label={ props.Label }
 		data-dg-features={ featuresAttribute(props.Disabled) }
@@ -59,7 +59,7 @@ templ Shell(props ShellProps) {
 				}
 			</section>
 		</div>
-	</monks-datagrid>
+	</data-grid>
 }
 
 // Controls renders the panel that container queries place above or beside the

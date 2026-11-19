@@ -14,7 +14,7 @@
    * returns undefined.
    */
 
-  const tagName = "monks-datagrid";
+  const tagName = "data-grid";
   const allFeatures = ["search", "sort", "filters", "pagination", "query"];
   // At or below this many rows the whole table is scannable, so controls
   // that exist to narrow it — auto facets, the search box — are noise.
@@ -1630,7 +1630,7 @@
   // loaded it, and a second define() throws NotSupportedError and takes
   // the rest of this script down with it. First definition wins; they
   // are the same class.
-  if (!customElements.get("monks-datagrid")) {
-    customElements.define("monks-datagrid", DatagridElement);
+  if (!customElements.get("data-grid")) {
+    customElements.define("data-grid", DatagridElement);
   }
 })();

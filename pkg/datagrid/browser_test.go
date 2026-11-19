@@ -223,7 +223,7 @@ func navigateReady(t *testing.T, ctx context.Context, target string) {
 	if err := chromedp.Run(ctx,
 		chromedp.EmulateViewport(1440, 1000),
 		browsertest.Open(target),
-		browsertest.Poll(`document.querySelectorAll("monks-datagrid[data-dg-ready]").length === 5`),
+		browsertest.Poll(`document.querySelectorAll("data-grid[data-dg-ready]").length === 5`),
 	); err != nil {
 		t.Fatalf("open datagrid fixture: %v", err)
 	}
@@ -556,7 +556,7 @@ func TestBrowserOpenFilterDropdownPaintsOverFollowingGrid(t *testing.T) {
 	if err := chromedp.Run(ctx,
 		chromedp.EmulateViewport(1440, 1000),
 		browsertest.Open(server.URL+"/"),
-		browsertest.Poll(`document.querySelectorAll("monks-datagrid[data-dg-ready]").length === 2`),
+		browsertest.Poll(`document.querySelectorAll("data-grid[data-dg-ready]").length === 2`),
 	); err != nil {
 		t.Fatalf("open stacked-grids fixture: %v", err)
 	}
@@ -1020,7 +1020,7 @@ func TestBrowserNoScriptEmptyStateMatchesInitialRows(t *testing.T) {
 			const empty = document.querySelector('#empty-grid [data-dg-role="empty"]');
 			const populated = document.querySelector('#populated-grid [data-dg-role="empty"]');
 			return {
-				readyCount: document.querySelectorAll('monks-datagrid[data-dg-ready]').length,
+				readyCount: document.querySelectorAll('data-grid[data-dg-ready]').length,
 				emptyHidden: empty.hidden,
 				emptyDisplay: getComputedStyle(empty).display,
 				populatedHidden: populated.hidden,
@@ -1377,7 +1377,7 @@ func TestBrowserUselessFacetsAreSuppressed(t *testing.T) {
 	if err := chromedp.Run(ctx,
 		chromedp.EmulateViewport(1200, 900),
 		browsertest.Open(server.URL+"/?dg.roomy.filter.serial=serial-3&dg.tinyq.search=serial-3"),
-		browsertest.Poll(`document.querySelectorAll("monks-datagrid[data-dg-ready]").length === 4`),
+		browsertest.Poll(`document.querySelectorAll("data-grid[data-dg-ready]").length === 4`),
 	); err != nil {
 		t.Fatalf("open facet-worthiness fixture: %v", err)
 	}
@@ -1476,7 +1476,7 @@ func TestBrowserHandwrittenMetadataDefaultsAndNoHookHotPath(t *testing.T) {
 	if err := chromedp.Run(ctx,
 		chromedp.Evaluate(`(() => {
 			const makeGrid = (id, count, nullFirstFilter) => {
-				const grid = document.createElement('monks-datagrid');
+				const grid = document.createElement('data-grid');
 				grid.id = id;
 				grid.dataset.dgFeatures = 'search filters query';
 				grid.dataset.dgQueryPrefix = 'dg.' + id;
@@ -1521,7 +1521,7 @@ func TestBrowserHandwrittenMetadataDefaultsAndNoHookHotPath(t *testing.T) {
 			window.datagridManual15 = makeGrid('manual-15', 17, true);
 			window.datagridManual16 = makeGrid('manual-16', 17, false);
 
-			const textGrid = document.createElement('monks-datagrid');
+			const textGrid = document.createElement('data-grid');
 			textGrid.id = 'manual-text-control';
 			textGrid.dataset.dgFeatures = '';
 			const layout = document.createElement('div');
@@ -2021,7 +2021,7 @@ func TestBrowserHostChromeCascade(t *testing.T) {
 	if err := chromedp.Run(ctx,
 		chromedp.EmulateViewport(1440, 1000),
 		browsertest.Open(server.URL+"/"),
-		browsertest.Poll(`document.querySelectorAll("monks-datagrid[data-dg-ready]").length === 1`),
+		browsertest.Poll(`document.querySelectorAll("data-grid[data-dg-ready]").length === 1`),
 	); err != nil {
 		t.Fatalf("open cascade fixture: %v", err)
 	}

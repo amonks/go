@@ -177,16 +177,16 @@ func Titled(t time.Time, p Precision) templ.Component {
 // and the next mutation record heals it; rare, and a frame long.) A
 // second rendering on one page — a component's chrome and its
 // embedder's — is a no-op, so the observer is never doubled. It also
-// leaves the formatter on the window as MonksLocalTime, so a page
+// leaves the formatter on the window as localTime, so a page
 // that draws its own stamps (an SSE-updated run, a query surface's
 // event table) renders them in the same shape:
 //
-//	MonksLocalTime.format(date, "minute")  →  "2026-08-28 14:05 PDT"
-//	MonksLocalTime.zone(date)              →  "PDT" — the zone's name at that
-//	                                          instant (now, when omitted), so a
-//	                                          tick across a DST change is named
-//	                                          for its own side of it
-//	MonksLocalTime.apply(root)             →  convert the stamps under root now
+//	window.localTime.format(date, "minute")  →  "2026-08-28 14:05 PDT"
+//	window.localTime.zone(date)              →  "PDT" — the zone's name at that
+//	                                            instant (now, when omitted), so a
+//	                                            tick across a DST change is named
+//	                                            for its own side of it
+//	window.localTime.apply(root)             →  convert the stamps under root now
 //
 // The layout renders it; an app with a layout of its own renders it in
 // that layout's head.
@@ -211,7 +211,7 @@ func Script() templ.Component {
 			templ_7745c5c3_Var9 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "<script id=\"monks-localtime-script\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "<script id=\"local-time-script\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -223,7 +223,7 @@ func Script() templ.Component {
 			var templ_7745c5c3_Var10 string
 			templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.GetNonce(ctx))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `localtime.templ`, Line: 49, Col: 95}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `localtime.templ`, Line: 49, Col: 90}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var10)
 			if templ_7745c5c3_Err != nil {
@@ -234,7 +234,7 @@ func Script() templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, ">\n\t\t(function () {\n\t\t\tif (window.MonksLocalTime) return;\n\t\t\tvar SELECTOR = 'time[datetime][data-localtime],time[datetime][data-localtime-title]';\n\t\t\tvar formatters = {};\n\t\t\tfunction formatter(precision) {\n\t\t\t\tif (!formatters[precision]) {\n\t\t\t\t\tvar opts = { year: 'numeric', month: '2-digit', day: '2-digit' };\n\t\t\t\t\tif (precision !== 'day') {\n\t\t\t\t\t\topts.hour = '2-digit';\n\t\t\t\t\t\topts.minute = '2-digit';\n\t\t\t\t\t\topts.hourCycle = 'h23';\n\t\t\t\t\t\topts.timeZoneName = 'short';\n\t\t\t\t\t}\n\t\t\t\t\tif (precision === 'second' || precision === 'millisecond') opts.second = '2-digit';\n\t\t\t\t\tif (precision === 'millisecond') opts.fractionalSecondDigits = 3;\n\t\t\t\t\tformatters[precision] = new Intl.DateTimeFormat(undefined, opts);\n\t\t\t\t}\n\t\t\t\treturn formatters[precision];\n\t\t\t}\n\t\t\tfunction format(at, precision) {\n\t\t\t\tvar d = at instanceof Date ? at : new Date(at);\n\t\t\t\tif (isNaN(d.getTime())) return '';\n\t\t\t\tvar p = {};\n\t\t\t\tformatter(precision).formatToParts(d).forEach(function (part) { p[part.type] = part.value; });\n\t\t\t\tvar text = p.year + '-' + p.month + '-' + p.day;\n\t\t\t\tif (precision === 'day') return text;\n\t\t\t\ttext += ' ' + p.hour + ':' + p.minute;\n\t\t\t\tif (precision === 'second' || precision === 'millisecond') text += ':' + p.second;\n\t\t\t\tif (precision === 'millisecond') text += '.' + p.fractionalSecond;\n\t\t\t\treturn text + ' ' + p.timeZoneName;\n\t\t\t}\n\t\t\tfunction zone(at) {\n\t\t\t\tvar d = at == null ? new Date() : at instanceof Date ? at : new Date(at);\n\t\t\t\tif (isNaN(d.getTime())) return '';\n\t\t\t\tvar name = '';\n\t\t\t\tformatter('minute').formatToParts(d).forEach(function (part) {\n\t\t\t\t\tif (part.type === 'timeZoneName') name = part.value;\n\t\t\t\t});\n\t\t\t\treturn name;\n\t\t\t}\n\t\t\tfunction convert(el) {\n\t\t\t\tvar d = new Date(el.getAttribute('datetime'));\n\t\t\t\tif (isNaN(d.getTime())) return;\n\t\t\t\tvar precision = el.dataset.localtime;\n\t\t\t\tif (precision) {\n\t\t\t\t\tvar text = format(d, precision);\n\t\t\t\t\tif (el.textContent !== text) el.textContent = text;\n\t\t\t\t}\n\t\t\t\tvar titled = el.dataset.localtimeTitle;\n\t\t\t\tif (titled) {\n\t\t\t\t\tvar title = format(d, titled);\n\t\t\t\t\tif (el.title !== title) el.title = title;\n\t\t\t\t}\n\t\t\t}\n\t\t\tfunction apply(root) {\n\t\t\t\tif (root.matches && root.matches(SELECTOR)) convert(root);\n\t\t\t\tif (root.querySelectorAll) root.querySelectorAll(SELECTOR).forEach(convert);\n\t\t\t}\n\t\t\tnew MutationObserver(function (records) {\n\t\t\t\trecords.forEach(function (r) {\n\t\t\t\t\tvar el = r.target.nodeType === 1 ? r.target : r.target.parentElement;\n\t\t\t\t\tvar host = el && el.closest(SELECTOR);\n\t\t\t\t\tif (host) convert(host);\n\t\t\t\t\tr.addedNodes.forEach(apply);\n\t\t\t\t});\n\t\t\t}).observe(document.documentElement, { childList: true, subtree: true });\n\t\t\tapply(document);\n\t\t\twindow.MonksLocalTime = { format: format, zone: zone, apply: apply };\n\t\t})();\n\t</script>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, ">\n\t\t(function () {\n\t\t\tif (window.localTime) return;\n\t\t\tvar SELECTOR = 'time[datetime][data-localtime],time[datetime][data-localtime-title]';\n\t\t\tvar formatters = {};\n\t\t\tfunction formatter(precision) {\n\t\t\t\tif (!formatters[precision]) {\n\t\t\t\t\tvar opts = { year: 'numeric', month: '2-digit', day: '2-digit' };\n\t\t\t\t\tif (precision !== 'day') {\n\t\t\t\t\t\topts.hour = '2-digit';\n\t\t\t\t\t\topts.minute = '2-digit';\n\t\t\t\t\t\topts.hourCycle = 'h23';\n\t\t\t\t\t\topts.timeZoneName = 'short';\n\t\t\t\t\t}\n\t\t\t\t\tif (precision === 'second' || precision === 'millisecond') opts.second = '2-digit';\n\t\t\t\t\tif (precision === 'millisecond') opts.fractionalSecondDigits = 3;\n\t\t\t\t\tformatters[precision] = new Intl.DateTimeFormat(undefined, opts);\n\t\t\t\t}\n\t\t\t\treturn formatters[precision];\n\t\t\t}\n\t\t\tfunction format(at, precision) {\n\t\t\t\tvar d = at instanceof Date ? at : new Date(at);\n\t\t\t\tif (isNaN(d.getTime())) return '';\n\t\t\t\tvar p = {};\n\t\t\t\tformatter(precision).formatToParts(d).forEach(function (part) { p[part.type] = part.value; });\n\t\t\t\tvar text = p.year + '-' + p.month + '-' + p.day;\n\t\t\t\tif (precision === 'day') return text;\n\t\t\t\ttext += ' ' + p.hour + ':' + p.minute;\n\t\t\t\tif (precision === 'second' || precision === 'millisecond') text += ':' + p.second;\n\t\t\t\tif (precision === 'millisecond') text += '.' + p.fractionalSecond;\n\t\t\t\treturn text + ' ' + p.timeZoneName;\n\t\t\t}\n\t\t\tfunction zone(at) {\n\t\t\t\tvar d = at == null ? new Date() : at instanceof Date ? at : new Date(at);\n\t\t\t\tif (isNaN(d.getTime())) return '';\n\t\t\t\tvar name = '';\n\t\t\t\tformatter('minute').formatToParts(d).forEach(function (part) {\n\t\t\t\t\tif (part.type === 'timeZoneName') name = part.value;\n\t\t\t\t});\n\t\t\t\treturn name;\n\t\t\t}\n\t\t\tfunction convert(el) {\n\t\t\t\tvar d = new Date(el.getAttribute('datetime'));\n\t\t\t\tif (isNaN(d.getTime())) return;\n\t\t\t\tvar precision = el.dataset.localtime;\n\t\t\t\tif (precision) {\n\t\t\t\t\tvar text = format(d, precision);\n\t\t\t\t\tif (el.textContent !== text) el.textContent = text;\n\t\t\t\t}\n\t\t\t\tvar titled = el.dataset.localtimeTitle;\n\t\t\t\tif (titled) {\n\t\t\t\t\tvar title = format(d, titled);\n\t\t\t\t\tif (el.title !== title) el.title = title;\n\t\t\t\t}\n\t\t\t}\n\t\t\tfunction apply(root) {\n\t\t\t\tif (root.matches && root.matches(SELECTOR)) convert(root);\n\t\t\t\tif (root.querySelectorAll) root.querySelectorAll(SELECTOR).forEach(convert);\n\t\t\t}\n\t\t\tnew MutationObserver(function (records) {\n\t\t\t\trecords.forEach(function (r) {\n\t\t\t\t\tvar el = r.target.nodeType === 1 ? r.target : r.target.parentElement;\n\t\t\t\t\tvar host = el && el.closest(SELECTOR);\n\t\t\t\t\tif (host) convert(host);\n\t\t\t\t\tr.addedNodes.forEach(apply);\n\t\t\t\t});\n\t\t\t}).observe(document.documentElement, { childList: true, subtree: true });\n\t\t\tapply(document);\n\t\t\twindow.localTime = { format: format, zone: zone, apply: apply };\n\t\t})();\n\t</script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
