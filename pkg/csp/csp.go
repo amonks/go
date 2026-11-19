@@ -12,7 +12,13 @@
 // proxy or the fleet's HTTP stack.
 package csp
 
-import "strings"
+import (
+	"errors"
+	"fmt"
+	"net/http"
+	"slices"
+	"strings"
+)
 
 // Directives are the four the fleet states for every page beside its
 // script policy, each closing a real hole and none of them able to
@@ -111,10 +117,61 @@ const NonceHeader = "Monks-Csp-Nonce"
 
 // SSNonceHeader is NonceHeader under the enterprise's SS- prefix, which
 // the fleet's protocol headers are taking (the tailnet-routing spec's
-// "The header rename" section). The proxy clears it on every forwarded
-// request and states nothing under it, and no app reads it: a caller
-// could forge it past a process from before the SS- strip.
+// "The header rename" section), and stripped off every caller the same
+// way. The proxy states the nonce under both names ([SetNonce]), and the
+// apps read either ([ReadNonce]).
 const SSNonceHeader = "SS-Csp-Nonce"
+
+// ErrNonceConflict is a request stating the nonce more than once with
+// different values: under one name, or under its two. The proxy states it
+// once under each, so a disagreement is the sender's fault, and a page
+// rendered under either value could be one whose scripts the policy
+// refuses.
+var ErrNonceConflict = errors.New("csp: the request's nonces disagree")
+
+// ReadNonce is the nonce h carries, read under SSNonceHeader and
+// NonceHeader: every value either name carries must be the same one, else
+// [ErrNonceConflict]; "" when h carries neither. legacy is NonceHeader
+// when the nonce arrived under it alone — a proxy from before the header
+// rename's second step — for the reader to record on its event
+// (wire.legacy_header), and "" otherwise.
+//
+// Transitional: NonceHeader goes when the proxy states SSNonceHeader
+// alone (the header rename); the check that the values agree stays.
+func ReadNonce(h http.Header) (nonce, legacy string, err error) {
+	ss, monks := h.Values(SSNonceHeader), h.Values(NonceHeader)
+	all := slices.Concat(ss, monks)
+	if len(all) == 0 {
+		return "", "", nil
+	}
+	for _, v := range all[1:] {
+		if v != all[0] {
+			return "", "", fmt.Errorf("%w: %s carries %d values and %s %d", ErrNonceConflict, SSNonceHeader, len(ss), NonceHeader, len(monks))
+		}
+	}
+	if len(ss) == 0 {
+		legacy = NonceHeader
+	}
+	return all[0], legacy, nil
+}
+
+// SetNonce states nonce in h under SSNonceHeader and NonceHeader,
+// replacing whatever either carried; DelNonce deletes both.
+//
+// Transitional: states SSNonceHeader alone when the apps read nothing
+// else (the header rename).
+func SetNonce(h http.Header, nonce string) {
+	h.Set(SSNonceHeader, nonce)
+	h.Set(NonceHeader, nonce)
+}
+
+// DelNonce deletes the nonce from h under both its names.
+//
+// Transitional: as [SetNonce].
+func DelNonce(h http.Header) {
+	h.Del(SSNonceHeader)
+	h.Del(NonceHeader)
+}
 
 // ScriptPolicy is the script-src the proxy states for every page it
 // serves, naming the request's nonce.

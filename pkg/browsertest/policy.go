@@ -37,8 +37,9 @@ import (
 // It does what the proxy does, from inside the browser, through CDP's
 // Fetch domain:
 //
-//  1. A document request to loopback carries a fresh nonce in
-//     csp.NonceHeader, as the proxy forwards one, so serve.Mux
+//  1. A document request to loopback carries a fresh nonce under
+//     csp.SSNonceHeader and csp.NonceHeader, as the proxy forwards one
+//     (csp.SetNonce), so serve.Mux
 //     stamps it where the app's templates read it. It bypasses the
 //     browser's cache (Cache-Control: no-cache, no conditional
 //     headers): the cache sits below the interception, so a cached
@@ -135,7 +136,8 @@ type Response struct {
 // one, a backslash escaping either. resourceType narrows it to one kind
 // of request, or "" for every kind. A document or worker answered this
 // way runs under the policy like one from the network: the request
-// answer is handed carries the nonce in csp.NonceHeader, so an answer
+// answer is handed carries the nonce under both its names, as
+// csp.SetNonce states it, so an answer
 // standing a page up at its production URL can render the scripts it
 // trusts.
 //
@@ -218,7 +220,8 @@ const FixtureNonce = "browsertest-fixture-nonce"
 
 // Nonced is page, rendered under FixtureNonce, as served to r.
 func Nonced(r *http.Request, page string) string {
-	return strings.ReplaceAll(page, FixtureNonce, r.Header.Get(csp.NonceHeader))
+	nonce, _, _ := csp.ReadNonce(r.Header)
+	return strings.ReplaceAll(page, FixtureNonce, nonce)
 }
 
 // ContentOrigin has ctx's tab treat origin (scheme, host and port: a
@@ -458,13 +461,14 @@ func (g *guard) request(executor context.Context, event *fetch.EventRequestPause
 	g.nonces[event.RequestID] = nonce
 	g.mu.Unlock()
 	headers := []*fetch.HeaderEntry{
+		{Name: csp.SSNonceHeader, Value: nonce},
 		{Name: csp.NonceHeader, Value: nonce},
 		{Name: "Cache-Control", Value: "no-cache"},
 		{Name: "Pragma", Value: "no-cache"},
 	}
 	for name, value := range event.Request.Headers {
 		switch strings.ToLower(name) {
-		case strings.ToLower(csp.NonceHeader), "cache-control", "pragma", "if-none-match", "if-modified-since":
+		case strings.ToLower(csp.SSNonceHeader), strings.ToLower(csp.NonceHeader), "cache-control", "pragma", "if-none-match", "if-modified-since":
 			continue
 		}
 		headers = append(headers, &fetch.HeaderEntry{Name: name, Value: fmt.Sprint(value)})
@@ -645,9 +649,9 @@ func (g *guard) answered(executor context.Context, event *fetch.EventRequestPaus
 	nonce := rand.Text()
 	if event.ResourceType == network.ResourceTypeDocument {
 		copied := *request
-		copied.Headers = network.Headers{csp.NonceHeader: nonce}
+		copied.Headers = network.Headers{csp.SSNonceHeader: nonce, csp.NonceHeader: nonce}
 		for name, value := range request.Headers {
-			if !strings.EqualFold(name, csp.NonceHeader) {
+			if !strings.EqualFold(name, csp.SSNonceHeader) && !strings.EqualFold(name, csp.NonceHeader) {
 				copied.Headers[name] = value
 			}
 		}

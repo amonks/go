@@ -1,6 +1,10 @@
 package csp
 
-import "testing"
+import (
+	"errors"
+	"net/http"
+	"testing"
+)
 
 // Pinned whole, because each source is a decision ScriptPolicy's doc
 // argues: no 'self' (media serves uploads from the origin typed by
@@ -83,5 +87,47 @@ func TestContentPolicy(t *testing.T) {
 	}
 	if got := ContentPolicy(); got != "base-uri 'self'; frame-ancestors 'self'; form-action 'none'; object-src 'none'" {
 		t.Errorf("ContentPolicy() = %q", got)
+	}
+}
+
+// The proxy states the nonce under both its names while the header rename
+// runs, and the apps read either: one value, under either name or both
+// alike; statements that disagree, under the two names or twice under
+// one, are the proxy's fault and no nonce at all. A nonce read under
+// NonceHeader alone says so, for the reader's event.
+func TestReadNonceTakesEitherNameAndRefusesDisagreement(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		header     http.Header
+		want       string
+		wantLegacy string
+		wantErr    bool
+	}{
+		{"neither", http.Header{}, "", "", false},
+		{"SS alone", http.Header{"Ss-Csp-Nonce": {"n"}}, "n", "", false},
+		{"Monks alone", http.Header{"Monks-Csp-Nonce": {"n"}}, "n", NonceHeader, false},
+		{"both, agreeing", http.Header{"Ss-Csp-Nonce": {"n"}, "Monks-Csp-Nonce": {"n"}}, "n", "", false},
+		{"both, disagreeing", http.Header{"Ss-Csp-Nonce": {"n"}, "Monks-Csp-Nonce": {"m"}}, "", "", true},
+		{"SS twice, disagreeing", http.Header{"Ss-Csp-Nonce": {"n", "m"}}, "", "", true},
+		{"Monks twice, disagreeing", http.Header{"Monks-Csp-Nonce": {"n", "m"}}, "", "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, legacy, err := ReadNonce(tc.header)
+			if tc.wantErr != (err != nil) || (err != nil && !errors.Is(err, ErrNonceConflict)) {
+				t.Fatalf("ReadNonce = %q, %q, %v; want error %v", got, legacy, err, tc.wantErr)
+			}
+			if got != tc.want || legacy != tc.wantLegacy {
+				t.Errorf("ReadNonce = %q, %q; want %q, %q", got, legacy, tc.want, tc.wantLegacy)
+			}
+		})
+	}
+	h := http.Header{"Monks-Csp-Nonce": {"stale", "staler"}}
+	SetNonce(h, "n")
+	if got, legacy, err := ReadNonce(h); got != "n" || legacy != "" || err != nil || len(h.Values(SSNonceHeader)) != 1 || len(h.Values(NonceHeader)) != 1 {
+		t.Errorf("after SetNonce: %v reads %q, %q, %v", h, got, legacy, err)
+	}
+	DelNonce(h)
+	if len(h) != 0 {
+		t.Errorf("DelNonce left %v", h)
 	}
 }
