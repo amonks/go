@@ -109,6 +109,13 @@ func ContentPolicy(ancestors ...string) string {
 // the proxy carries none.
 const NonceHeader = "Monks-Csp-Nonce"
 
+// SSNonceHeader is NonceHeader under the enterprise's SS- prefix, which
+// the fleet's protocol headers are taking (the tailnet-routing spec's
+// "The header rename" section). The proxy clears it on every forwarded
+// request and states nothing under it, and no app reads it: a caller
+// could forge it past a process from before the SS- strip.
+const SSNonceHeader = "SS-Csp-Nonce"
+
 // ScriptPolicy is the script-src the proxy states for every page it
 // serves, naming the request's nonce.
 //
