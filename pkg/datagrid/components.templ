@@ -48,13 +48,25 @@ templ Shell(props ShellProps) {
 			}
 			<section class="datagrid-content" aria-label="Table results">
 				<div class="datagrid-statusbar">
-					@ResultSummary(ControlProps{GridID: props.ID, InitialRows: props.InitialRows})
+					if props.Summary != nil {
+						// The caller's summary carries no data-dg-role, so the
+						// element leaves it alone.
+						<p id={ props.ID + "-summary" } class="datagrid-summary" role="status" aria-live="polite" aria-atomic="true">
+							@props.Summary
+						</p>
+					} else {
+						@ResultSummary(ControlProps{GridID: props.ID, InitialRows: props.InitialRows})
+					}
 				</div>
 				<div class="datagrid-table-wrap">
 					{ children... }
 				</div>
 				@EmptyState(ControlProps{GridID: props.ID, InitialRows: props.InitialRows, EmptyText: props.EmptyText, Empty: props.Empty})
-				if props.Disabled&FeaturePagination == 0 {
+				if props.Pagination != nil {
+					<nav id={ props.ID + "-pagination" } class="datagrid-pagination" aria-label="Table pages">
+						@props.Pagination
+					</nav>
+				} else if props.Disabled&FeaturePagination == 0 {
 					@PaginationControl(ControlProps{GridID: props.ID})
 				}
 			</section>

@@ -189,6 +189,17 @@ type ShellProps struct {
 	ControlPanel templ.Component
 	Extra        templ.Component
 	Empty        templ.Component
+	// Summary and Pagination are a server-paged table's own result line
+	// and pager. The element can count only the rows it was sent, so a
+	// caller that holds the rows and sends one page says what the page
+	// is. Each fills its slot — the status bar's live region, the nav
+	// below the table — in place of the element's, which never touches
+	// it, and shows with or without the script. Such a caller disables
+	// the element's features and renders its own controls through
+	// ControlPanel; the controls may wear the built-in controls' classes
+	// to look like them.
+	Summary    templ.Component
+	Pagination templ.Component
 }
 
 // HeaderCellProps configures an annotated table header for low-level grids.

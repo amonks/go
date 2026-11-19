@@ -78,13 +78,18 @@ data-grid:not([data-dg-ready]) .datagrid-layout {
   display: block;
 }
 
+/* Until the element upgrades, what it writes — the summary, the pager,
+   the built-in controls — is hidden. A server-paged caller's summary,
+   pager, and controls are final as served (ShellProps.Summary and
+   Pagination, the ControlPanel's contents), so they show from the
+   first paint and without the script. */
 data-grid:not([data-dg-ready]) .datagrid-panel:not(:has(.datagrid-control-override:not(:empty), .datagrid-extra:not(:empty))),
-data-grid:not([data-dg-ready]) .datagrid-statusbar,
-data-grid:not([data-dg-ready]) .datagrid-pagination {
+data-grid:not([data-dg-ready]) .datagrid-statusbar:has(> [data-dg-role="summary"]),
+data-grid:not([data-dg-ready]) .datagrid-pagination[data-dg-role="pagination"] {
   display: none;
 }
 
-data-grid:not([data-dg-ready]) :is(.datagrid-search-wrap, .datagrid-filterbar, .datagrid-clear-all) {
+data-grid:not([data-dg-ready]) .datagrid-panel > :is(.datagrid-search-wrap, .datagrid-filterbar, .datagrid-clear-all) {
   display: none;
 }
 
@@ -376,6 +381,17 @@ data-grid .datagrid-filter-clear {
 data-grid .datagrid-clear-all:hover,
 data-grid .datagrid-filter-clear:hover {
   background: var(--datagrid-accent-soft);
+}
+
+/* A server-paged caller's controls are links: its Reset, its sort
+   headers, and its pager's pages wear the built-in controls' classes. */
+data-grid a:is(.datagrid-clear-all, .datagrid-sort, .datagrid-page) {
+  text-decoration: none;
+}
+
+data-grid a.datagrid-clear-all {
+  display: inline-grid;
+  place-items: center;
 }
 
 /* A slot with nothing in it is no slot: it would otherwise wrap onto a
@@ -676,7 +692,7 @@ data-grid .datagrid-page {
   cursor: pointer;
 }
 
-data-grid .datagrid-page:hover:not(:disabled) {
+data-grid .datagrid-page:hover:not(:disabled, [aria-disabled="true"]) {
   border-color: var(--datagrid-border);
   background: var(--datagrid-hover);
   color: var(--datagrid-text);
@@ -689,7 +705,7 @@ data-grid .datagrid-page.is-current {
   opacity: 1;
 }
 
-data-grid .datagrid-page:disabled:not(.is-current) {
+data-grid .datagrid-page:is(:disabled, [aria-disabled="true"]):not(.is-current) {
   color: var(--datagrid-faint);
   cursor: default;
   opacity: 0.45;
@@ -703,7 +719,7 @@ data-grid .datagrid-page-ellipsis {
   color: var(--datagrid-faint);
 }
 
-data-grid :where(button, input, select, summary):focus-visible {
+data-grid :where(a, button, input, select, summary):focus-visible {
   outline: 2px solid var(--datagrid-focus);
   outline-offset: 2px;
 }

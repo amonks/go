@@ -229,6 +229,48 @@ func TestShellAppliesUsefulDefaultsForCallerOwnedTables(t *testing.T) {
 	}
 }
 
+// A server-paged caller's summary and pager take the element's slots
+// without the element's role markers, so the element — which finds its
+// hosts by role — writes into neither.
+func TestShellTakesAServerPagedSummaryAndPager(t *testing.T) {
+	ctx := templ.WithChildren(context.Background(), templ.Raw(`<table id="served-table"><tbody></tbody></table>`))
+	var out strings.Builder
+	props := ShellProps{
+		ID:         "served",
+		Disabled:   allFeatures,
+		Summary:    templ.Raw(`Showing 26–50 of 60 rows`),
+		Pagination: templ.Raw(`<a class="datagrid-page" href="?dg.served.page=3">3</a>`),
+	}
+	if err := Shell(props).Render(ctx, &out); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	summary := regexp.MustCompile(`(?s)<p id="served-summary"[^>]*>.*?</p>`).FindString(got)
+	if !strings.Contains(summary, "Showing 26–50 of 60 rows") || !strings.Contains(summary, `role="status"`) {
+		t.Errorf("caller summary not in the live region: %q", summary)
+	}
+	pager := regexp.MustCompile(`(?s)<nav id="served-pagination"[^>]*>.*?</nav>`).FindString(got)
+	if !strings.Contains(pager, `href="?dg.served.page=3"`) || !strings.Contains(pager, `aria-label="Table pages"`) {
+		t.Errorf("caller pager not in the pagination slot: %q", pager)
+	}
+	for _, role := range []string{`data-dg-role="summary"`, `data-dg-role="pagination"`} {
+		if strings.Contains(got, role) {
+			t.Errorf("shell renders the element's %s host beside the caller's", role)
+		}
+	}
+
+	// Without them, the element's own hosts are where they were.
+	out.Reset()
+	if err := Shell(ShellProps{ID: "served"}).Render(ctx, &out); err != nil {
+		t.Fatal(err)
+	}
+	for _, role := range []string{`data-dg-role="summary"`, `data-dg-role="pagination"`} {
+		if !strings.Contains(out.String(), role) {
+			t.Errorf("default shell lost its %s host", role)
+		}
+	}
+}
+
 func TestLowLevelCellDefaultsBehaviorToItsValue(t *testing.T) {
 	got := renderComponent(t, Cell(CellProps{Column: "name", Value: "Ada"}))
 	for _, redundant := range []string{"data-dg-search-value", "data-dg-sort-value", "data-dg-filter-values"} {
