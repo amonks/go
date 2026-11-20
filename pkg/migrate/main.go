@@ -11,6 +11,11 @@ import (
 	"time"
 )
 
+// ReservedPrefix begins the name of every table the fleet's
+// infrastructure keeps in a database beside the app's own — pkg/database's
+// replication heartbeat among them. Run never counts one as app data.
+const ReservedPrefix = "_ss_"
+
 type Config struct {
 	DB       *sql.DB
 	FS       fs.FS
@@ -100,6 +105,21 @@ func loadMigrationFiles(fsys fs.FS, dir string) ([]migrationFile, error) {
 	return files, nil
 }
 
+// infrastructureTable reports whether a table is one something other than
+// the app made: SQLite's own (sqlite_*, a prefix SQLite reserves whatever
+// its case), litestream's bookkeeping (_litestream_*), and anything under
+// ReservedPrefix.
+func infrastructureTable(name string) bool {
+	lower := strings.ToLower(name)
+	if strings.HasPrefix(lower, "sqlite_") || strings.HasPrefix(lower, "_litestream_") || strings.HasPrefix(name, ReservedPrefix) {
+		return true
+	}
+	// Transitional: pkg/database's heartbeat was _monks_replication_heartbeat,
+	// which it drops when replication starts. Until that drop is removed, a
+	// database may still hold it when it is migrated.
+	return name == "_monks_replication_heartbeat"
+}
+
 // initTrackingTable ensures applied_migrations exists. Returns true if this
 // is an existing database (has user tables already).
 func initTrackingTable(ctx context.Context, db *sql.DB) (isExisting bool, err error) {
@@ -120,14 +140,24 @@ func initTrackingTable(ctx context.Context, db *sql.DB) (isExisting bool, err er
 	// heartbeat, so counting those would make a database that has never
 	// held app data look like an existing one, and baseline files would be
 	// recorded without ever creating the app's tables.
-	err = db.QueryRowContext(ctx,
-		`SELECT count(*) FROM sqlite_master
-		 WHERE type='table'
-		   AND name NOT LIKE 'sqlite_%'
-		   AND name NOT LIKE '\_litestream\_%' ESCAPE '\'
-		   AND name NOT LIKE '\_monks\_%' ESCAPE '\'`,
-	).Scan(&count)
+	rows, err := db.QueryContext(ctx, `SELECT name FROM sqlite_master WHERE type='table'`)
 	if err != nil {
+		return false, err
+	}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			rows.Close()
+			return false, err
+		}
+		if !infrastructureTable(name) {
+			count++
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return false, err
+	}
+	if err := rows.Err(); err != nil {
 		return false, err
 	}
 	isExisting = count > 0

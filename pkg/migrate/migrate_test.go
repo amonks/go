@@ -207,6 +207,9 @@ func TestInfrastructureTablesDoNotCountAsExisting(t *testing.T) {
 	for _, ddl := range []string{
 		"CREATE TABLE _litestream_seq (id INTEGER PRIMARY KEY, seq INTEGER);",
 		"CREATE TABLE _litestream_lock (id INTEGER);",
+		"CREATE TABLE _ss_replication_heartbeat (id INTEGER PRIMARY KEY, at TEXT);",
+		// Transitional: the heartbeat's former name, until pkg/database
+		// stops dropping it.
 		"CREATE TABLE _monks_replication_heartbeat (id INTEGER PRIMARY KEY, at TEXT);",
 	} {
 		if _, err := db.Exec(ddl); err != nil {
@@ -231,6 +234,31 @@ func TestInfrastructureTablesDoNotCountAsExisting(t *testing.T) {
 	var count int
 	if err := db.QueryRow("SELECT count(*) FROM users").Scan(&count); err != nil {
 		t.Fatal("users table should exist:", err)
+	}
+}
+
+// The reserved prefix is matched exactly, not as a LIKE pattern's
+// wildcards: an app's table that merely resembles it is app data.
+func TestTablesResemblingTheReservedPrefixAreAppData(t *testing.T) {
+	for _, table := range []string{"_ssh_keys", "xss_users", "_SS_users"} {
+		t.Run(table, func(t *testing.T) {
+			db := openTestDB(t)
+			if _, err := db.Exec("CREATE TABLE " + table + " (id INTEGER PRIMARY KEY);"); err != nil {
+				t.Fatal(err)
+			}
+			migrations := makeFS(map[string]string{
+				// Recorded without running on an existing database; run, it
+				// would leave a table behind.
+				"migrations/001_create_users.sql": "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);",
+			})
+			if err := migrate.Run(context.Background(), migrate.Config{DB: db, FS: migrations, Dir: "migrations", Baseline: []string{"001_create_users.sql"}}); err != nil {
+				t.Fatal(err)
+			}
+			var n int
+			if err := db.QueryRow("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='users'").Scan(&n); err != nil || n != 0 {
+				t.Fatalf("the baseline ran over a database holding %s: %d, %v", table, n, err)
+			}
+		})
 	}
 }
 
