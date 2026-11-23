@@ -92,6 +92,8 @@ func TestGoogleCapabilities(t *testing.T) {
 		{"gemini-4-carbon", []ThinkingLevel{"", ThinkingLow, ThinkingMedium, ThinkingHigh}},
 		{"gemini-4-hydrogen", []ThinkingLevel{"", ThinkingLow, ThinkingMedium, ThinkingHigh, ThinkingXHigh}},
 		{"gemini-4-neon", []ThinkingLevel{"", ThinkingLow, ThinkingMedium, ThinkingHigh, ThinkingXHigh}},
+		// https://ai.google.dev/gemini-api/docs/models/gemini-robotics-er-2-preview
+		{"gemini-robotics-er-2-preview", []ThinkingLevel{"", ThinkingMinimal, ThinkingLow, ThinkingMedium, ThinkingHigh}},
 	} {
 		t.Run(tc.id, func(t *testing.T) {
 			m := googleTestModel()

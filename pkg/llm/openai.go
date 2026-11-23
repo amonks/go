@@ -168,6 +168,17 @@ func streamOpenAICompletions(ctx context.Context, model Model, req Request, opts
 }
 
 func convertToOpenAIRequest(model Model, req Request, opts StreamOptions) (openAICompletionsRequest, error) {
+	// A declared family's known endpoint limits fail here, before a request
+	// the provider would refuse; unknown models go to whatever compatible
+	// endpoint the caller named.
+	if family, ok := openAIFamily(model.ID); ok {
+		if family.responsesOnly {
+			return openAICompletionsRequest{}, fmt.Errorf("llm: OpenAI model %s is served by the Responses API alone", model.ID)
+		}
+		if family.completionsNoTools && len(req.Tools) > 0 {
+			return openAICompletionsRequest{}, fmt.Errorf("llm: OpenAI model %s takes no tools on Chat Completions; use the Responses API", model.ID)
+		}
+	}
 	openAIReq := openAICompletionsRequest{
 		Model:         model.ID,
 		Stream:        true,

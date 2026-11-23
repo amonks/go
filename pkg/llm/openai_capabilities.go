@@ -8,33 +8,87 @@ import (
 
 var openAISnapshotSuffix = regexp.MustCompile(`-\d{4}-\d{2}-\d{2}$`)
 
-// responsesEfforts records documented request capabilities, not account access.
-// Model retrieval exposes no capability metadata. Unknown names therefore cannot
+// openAIModel is one declared OpenAI family: the reasoning efforts its
+// model page documents, whether that page lists the Responses API alone
+// among the generation endpoints, whether Chat Completions refuses it
+// tools, and, for a family whose first dated snapshots precede native
+// structured output, the earliest snapshot that has it. The facts sit in one declaration, as googleModel's do, so
+// a family can't be declared in one table and missing from another.
+type openAIModel struct {
+	efforts       []string
+	responsesOnly bool
+	// Every GPT-6 model's Chat Completions endpoint takes function calls
+	// only with reasoning off, and the Completions adapter sends no
+	// reasoning setting, so a GPT-6 model that always reasons takes no
+	// tools there: https://developers.openai.com/api/docs/guides/latest-model#migration-quickstart
+	completionsNoTools bool
+	firstSnapshot      string
+}
+
+var (
+	openAIOff        = []string{"off"} // Non-reasoning models take no reasoning parameter.
+	openAIMinToHigh  = []string{"minimal", "low", "medium", "high"}
+	openAINoneToHigh = []string{"none", "low", "medium", "high"}
+	openAINoneToXH   = []string{"none", "low", "medium", "high", "xhigh"}
+	openAINoneToMax  = []string{"none", "low", "medium", "high", "xhigh", "max"}
+	openAILowToMax   = []string{"low", "medium", "high", "xhigh", "max"}
+)
+
+// openAIModels records documented request capabilities, not account access.
+// Model retrieval exposes no capability metadata, so unknown names cannot
 // promise any explicit effort setting; the provider may still take its default.
 // Sources: https://developers.openai.com/api/docs/models/{model}
 // A family OpenAI shuts down leaves the table, snapshots and all:
 // gpt-4.1-nano, o1, o3-mini and o4-mini went on 2026-10-23
-// (https://developers.openai.com/api/docs/deprecations).
-func responsesEfforts(id string) []string {
-	id = openAISnapshotSuffix.ReplaceAllString(id, "")
-	switch id {
-	case "gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini":
-		return []string{"off"} // Non-reasoning models take no reasoning parameter.
-	case "gpt-5", "gpt-5-mini", "gpt-5-nano":
-		return []string{"minimal", "low", "medium", "high"}
-	case "o3":
-		return []string{"low", "medium", "high"}
-	case "gpt-5.1":
-		return []string{"none", "low", "medium", "high"}
-	case "gpt-5.2", "gpt-5.4", "gpt-5.5":
-		return []string{"none", "low", "medium", "high", "xhigh"}
-	case "gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-sol", "gpt-6-luna", "gpt-6.1-terra":
-		return []string{"none", "low", "medium", "high", "xhigh", "max"}
-	case "gpt-6-astra", "gpt-6.1-sol", "gpt-6.2-astra", "gpt-6.2-sol":
-		return []string{"low", "medium", "high", "xhigh", "max"}
-	default:
-		return nil
+// (https://developers.openai.com/api/docs/deprecations). GPT-5 Pro
+// "defaults to (and only supports) reasoning.effort: high"; GPT-5 Pro and
+// GPT-5.3-Codex are the Responses-only families. The gpt-5.6 alias routes
+// to gpt-5.6-sol and takes its parameters.
+var openAIModels = map[string]openAIModel{
+	"gpt-4.1":       {efforts: openAIOff},
+	"gpt-4.1-mini":  {efforts: openAIOff},
+	"gpt-4o":        {efforts: openAIOff, firstSnapshot: "2024-08-06"},
+	"gpt-4o-mini":   {efforts: openAIOff, firstSnapshot: "2024-07-18"},
+	"o3":            {efforts: []string{"low", "medium", "high"}},
+	"gpt-5":         {efforts: openAIMinToHigh},
+	"gpt-5-mini":    {efforts: openAIMinToHigh},
+	"gpt-5-nano":    {efforts: openAIMinToHigh},
+	"gpt-5-pro":     {efforts: []string{"high"}, responsesOnly: true},
+	"gpt-5.1":       {efforts: openAINoneToHigh},
+	"gpt-5.2":       {efforts: openAINoneToXH},
+	"gpt-5.3-codex": {efforts: []string{"low", "medium", "high", "xhigh"}, responsesOnly: true},
+	"gpt-5.4":       {efforts: openAINoneToXH},
+	"gpt-5.4-mini":  {efforts: openAINoneToXH},
+	"gpt-5.4-nano":  {efforts: openAINoneToXH},
+	"gpt-5.5":       {efforts: openAINoneToXH},
+	"gpt-5.6":       {efforts: openAINoneToMax},
+	"gpt-5.6-sol":   {efforts: openAINoneToMax},
+	"gpt-5.6-terra": {efforts: openAINoneToMax},
+	"gpt-5.6-luna":  {efforts: openAINoneToMax},
+	"gpt-6-sol":     {efforts: openAINoneToMax},
+	"gpt-6-luna":    {efforts: openAINoneToMax},
+	"gpt-6.1-terra": {efforts: openAINoneToMax},
+	"gpt-6-astra":   {efforts: openAILowToMax, completionsNoTools: true},
+	"gpt-6.1-sol":   {efforts: openAILowToMax, completionsNoTools: true},
+	"gpt-6.2-astra": {efforts: openAILowToMax, completionsNoTools: true},
+	"gpt-6.2-sol":   {efforts: openAILowToMax, completionsNoTools: true},
+}
+
+// openAIFamily resolves a model id, dated snapshot or not, to its declared
+// family. A snapshot older than its family's first structured-output
+// snapshot is no declared model.
+func openAIFamily(id string) (openAIModel, bool) {
+	family := openAISnapshotSuffix.ReplaceAllString(id, "")
+	m, ok := openAIModels[family]
+	if ok && family != id && id[len(family)+1:] < m.firstSnapshot {
+		return openAIModel{}, false
 	}
+	return m, ok
+}
+
+func responsesEfforts(id string) []string {
+	m, _ := openAIFamily(id)
+	return m.efforts
 }
 
 func responsesReasoningEffort(id string, level ThinkingLevel) (string, error) {

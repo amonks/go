@@ -149,7 +149,11 @@ func TestResponsesCapabilitySnapshotsAndTemperature(t *testing.T) {
 	}
 	// gpt-4.1-nano, o1, o3-mini and o4-mini shut down on 2026-10-23,
 	// snapshots included: https://developers.openai.com/api/docs/deprecations
-	for _, id := range []string{"text-embedding-3-small", "gpt-5.6-unknown", "gpt-5.2-pro", "gpt-5.6-sol-made-up",
+	// GPT-5.2 Pro and 5.4 Pro have no structured outputs, and GPT-5.5 Pro
+	// and o3-pro don't stream, so neither can serve a request this
+	// adapter makes; chat-latest names whatever ChatGPT runs this week.
+	for _, id := range []string{"text-embedding-3-small", "gpt-5.6-unknown", "gpt-5.6-sol-made-up",
+		"gpt-5.2-pro", "gpt-5.4-pro", "gpt-5.5-pro", "gpt-5.5-pro-2026-04-23", "o3-pro", "o3-pro-2025-06-10", "chat-latest",
 		"gpt-4.1-nano", "gpt-4.1-nano-2025-04-14", "o1", "o1-2024-12-17", "o3-mini", "o3-mini-2025-01-31", "o4-mini", "o4-mini-2025-04-16"} {
 		m := Model{ID: id, API: APIOpenAIResponses}
 		if m.SupportsToolChoice() || m.SupportsThinkingLevel(ThinkingOff) {
@@ -253,5 +257,75 @@ func TestResponsesGPT6SolAndLuna(t *testing.T) {
 				t.Error("unsupported minimal effort accepted")
 			}
 		})
+	}
+}
+
+// The families the GPT-6 tests leave out, at the efforts each page
+// states. GPT-5 Pro "defaults to (and only supports) reasoning.effort:
+// high"; GPT-5.3-Codex takes low through xhigh; GPT-5.4 mini and nano
+// take none through xhigh. Pro and Codex are Responses-only, so Chat
+// Completions offers them neither structured output nor a forced tool. Codex's API also lists none among its
+// supported values (2026-11-23), but the page states low through xhigh,
+// and the table declares what the page documents.
+// https://developers.openai.com/api/docs/models/gpt-5-pro
+// https://developers.openai.com/api/docs/models/gpt-5.3-codex
+// https://developers.openai.com/api/docs/models/gpt-5.4-mini
+// https://developers.openai.com/api/docs/models/gpt-5.4-nano
+func TestResponsesGPT5ProCodexAndSmallModels(t *testing.T) {
+	for _, tc := range []struct {
+		id          string
+		completions bool
+		efforts     []ThinkingLevel
+	}{
+		{"gpt-5-pro", false, []ThinkingLevel{ThinkingHigh}},
+		{"gpt-5-pro-2025-10-06", false, []ThinkingLevel{ThinkingHigh}},
+		{"gpt-5.3-codex", false, []ThinkingLevel{ThinkingLow, ThinkingMedium, ThinkingHigh, ThinkingXHigh}},
+		{"gpt-5.4-mini", true, []ThinkingLevel{ThinkingOff, ThinkingLow, ThinkingMedium, ThinkingHigh, ThinkingXHigh}},
+		{"gpt-5.4-mini-2026-03-17", true, []ThinkingLevel{ThinkingOff, ThinkingLow, ThinkingMedium, ThinkingHigh, ThinkingXHigh}},
+		{"gpt-5.4-nano", true, []ThinkingLevel{ThinkingOff, ThinkingLow, ThinkingMedium, ThinkingHigh, ThinkingXHigh}},
+	} {
+		t.Run(tc.id, func(t *testing.T) {
+			model := Model{ID: tc.id, API: APIOpenAIResponses}
+			if got, want := model.ThinkingLevels(), append([]ThinkingLevel{""}, tc.efforts...); !slices.Equal(got, want) {
+				t.Errorf("levels = %v, want %v", got, want)
+			}
+			if !model.SupportsStructuredOutput() || !model.SupportsToolChoice() {
+				t.Error("missing documented structured output or tool choice")
+			}
+			completions := Model{ID: tc.id, API: APIOpenAICompletions}
+			if got := completions.SupportsStructuredOutput(); got != tc.completions {
+				t.Errorf("completions structured output = %v, want %v", got, tc.completions)
+			}
+			if got := completions.SupportsToolChoice(); got != tc.completions {
+				t.Errorf("completions tool choice = %v, want %v", got, tc.completions)
+			}
+			if _, err := convertToOpenAIRequest(completions, Request{}, StreamOptions{}); (err == nil) != tc.completions {
+				t.Errorf("completions request error = %v, want one only off Chat Completions", err)
+			}
+		})
+	}
+}
+
+// Every GPT-6 model's Chat Completions endpoint takes function calls only
+// with reasoning off, and the adapter sends no reasoning setting there, so
+// the models that always reason take no tools on Chat Completions at all;
+// the ones that can stop reasoning keep them.
+// https://developers.openai.com/api/docs/guides/latest-model#migration-quickstart
+func TestChatCompletionsToolsOnGPT6(t *testing.T) {
+	tools := Request{Tools: []Tool{{Name: "lookup", Parameters: struct{}{}}}}
+	for id, toolsOK := range map[string]bool{
+		"gpt-6-astra": false, "gpt-6.1-sol": false, "gpt-6.2-astra": false, "gpt-6.2-sol": false, "gpt-6.2-sol-2026-11-17": false,
+		"gpt-6-sol": true, "gpt-6-luna": true, "gpt-6.1-terra": true, "gpt-4.1": true, "some-compatible-model": true,
+	} {
+		model := Model{ID: id, API: APIOpenAICompletions}
+		if got := model.SupportsToolChoice(); got != toolsOK {
+			t.Errorf("%s: tool choice = %v, want %v", id, got, toolsOK)
+		}
+		if _, err := convertToOpenAIRequest(model, tools, StreamOptions{}); (err == nil) != toolsOK {
+			t.Errorf("%s: request with tools error = %v, want error %v", id, err, !toolsOK)
+		}
+		if _, err := convertToOpenAIRequest(model, Request{}, StreamOptions{}); err != nil {
+			t.Errorf("%s: request without tools refused: %v", id, err)
+		}
 	}
 }

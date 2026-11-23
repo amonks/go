@@ -23,8 +23,10 @@ func TestFableRequests(t *testing.T) {
 	} {
 		t.Run(id, func(t *testing.T) {
 			model := Model{ID: id, API: APIAnthropicMessages, MaxTokens: 128000}
-			if !model.SupportsStructuredOutput() {
-				t.Error("native structured output must be advertised")
+			// Mythos shares Fable's request shape but is no declared model:
+			// only organizations Anthropic verifies can run it.
+			if got, want := model.SupportsStructuredOutput(), strings.HasPrefix(id, "claude-fable"); got != want {
+				t.Errorf("native structured output = %v, want %v", got, want)
 			}
 			if model.SupportsToolChoice() {
 				t.Error("forced tools must not be advertised")
@@ -73,6 +75,12 @@ func TestFableRequests(t *testing.T) {
 				}
 			}
 			req, err := convertToAnthropicRequest(model, Request{OutputSchema: GenerateSchema(outputFixture{})}, StreamOptions{})
+			if !model.SupportsStructuredOutput() {
+				if err == nil {
+					t.Error("structured answer built for an undeclared model")
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -48,6 +48,7 @@ var googleModels = map[string]googleModel{
 	"gemini-3.5-flash":                   {levels: geminiMinimalToHigh},
 	"gemini-3.5-flash-lite":              {levels: geminiMinimalToHigh},
 	"gemini-3.6-flash":                   {levels: geminiMinimalToHigh},
+	"gemini-robotics-er-2-preview":       {levels: geminiMinimalToHigh},
 	"gemini-3.1-pro-preview":             {levels: geminiLowToHigh},
 	"gemini-3.1-pro-preview-customtools": {levels: geminiLowToHigh},
 	"gemini-3.7-flash":                   {levels: geminiLowToHigh},

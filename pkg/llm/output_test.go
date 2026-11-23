@@ -275,6 +275,15 @@ func TestStructuredOutputKnownFamilies(t *testing.T) {
 		{"o3-mini", APIOpenAIResponses, false},
 		{"o4-mini-2025-04-16", APIOpenAIResponses, false},
 		{"gpt-4.1-nano", APIOpenAICompletions, false},
+		{"gpt-5.3-codex", APIOpenAIResponses, true},
+		{"gpt-5.3-codex", APIOpenAICompletions, false},
+		{"gpt-5.4-pro", APIOpenAIResponses, false},
+		// Open only to organizations Anthropic verifies, and to Project
+		// Glasswing: https://platform.claude.com/docs/en/about-claude/models/overview
+		{"claude-mythos-5-2", APIAnthropicMessages, false},
+		{"claude-mythos-5-1-20260901", APIAnthropicMessages, false},
+		{"claude-mythos-preview", APIAnthropicMessages, false},
+		{"gemini-robotics-er-2-preview", APIGoogleGenerateContent, true},
 		{"claude-opus-5-5", APIAnthropicMessages, true},
 		{"claude-opus-5-99", APIAnthropicMessages, false},
 		{"claude-haiku-4-5-20251001", APIAnthropicMessages, true},
