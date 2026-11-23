@@ -91,6 +91,7 @@ func TestGoogleCapabilities(t *testing.T) {
 		{"gemini-4-argon", []ThinkingLevel{"", ThinkingLow, ThinkingMedium, ThinkingHigh}},
 		{"gemini-4-carbon", []ThinkingLevel{"", ThinkingLow, ThinkingMedium, ThinkingHigh}},
 		{"gemini-4-hydrogen", []ThinkingLevel{"", ThinkingLow, ThinkingMedium, ThinkingHigh, ThinkingXHigh}},
+		{"gemini-4-neon", []ThinkingLevel{"", ThinkingLow, ThinkingMedium, ThinkingHigh, ThinkingXHigh}},
 	} {
 		t.Run(tc.id, func(t *testing.T) {
 			m := googleTestModel()
@@ -642,25 +643,30 @@ func TestGooglePositionalResultsBecomeIdentifiedAcrossReplayScopes(t *testing.T)
 	}
 }
 
-// Hydrogen's fourth level goes out as the GenerateContent enum's XHIGH,
-// the spelling its API reference lists and a live request accepted.
-func TestGoogleHydrogenSendsXHigh(t *testing.T) {
-	m := googleTestModel()
-	m.ID = "gemini-4-hydrogen"
-	req, err := convertToGoogleRequest(m, Request{}, StreamOptions{ThinkingLevel: ThinkingXHigh})
-	if err != nil || req.GenerationConfig.ThinkingConfig == nil || req.GenerationConfig.ThinkingConfig.ThinkingLevel != "XHIGH" {
-		t.Fatalf("thinking=%+v err=%v", req.GenerationConfig.ThinkingConfig, err)
-	}
-	if _, err := convertToGoogleRequest(m, Request{}, StreamOptions{ThinkingLevel: ThinkingMinimal}); err == nil {
-		t.Fatal("accepted minimal, which Hydrogen refuses")
+// Hydrogen's and Neon's fourth level goes out as the GenerateContent
+// enum's XHIGH, the spelling its API reference lists and live requests to
+// both accepted; both refuse MINIMAL.
+func TestGoogleXHighModelsSendXHigh(t *testing.T) {
+	for _, id := range []string{"gemini-4-hydrogen", "gemini-4-neon"} {
+		t.Run(id, func(t *testing.T) {
+			m := googleTestModel()
+			m.ID = id
+			req, err := convertToGoogleRequest(m, Request{}, StreamOptions{ThinkingLevel: ThinkingXHigh})
+			if err != nil || req.GenerationConfig.ThinkingConfig == nil || req.GenerationConfig.ThinkingConfig.ThinkingLevel != "XHIGH" {
+				t.Fatalf("thinking=%+v err=%v", req.GenerationConfig.ThinkingConfig, err)
+			}
+			if _, err := convertToGoogleRequest(m, Request{}, StreamOptions{ThinkingLevel: ThinkingMinimal}); err == nil {
+				t.Fatal("accepted minimal, which it refuses")
+			}
+		})
 	}
 }
 
 // Every Gemini 4 model streams at most 65,536 tokens a hop; a larger cap
 // is long decode, whose continuation protocol the adapter lacks. Each
 // runs at the output limit its Models API metadata reports: Argon's and
-// Carbon's non-streaming hop, and Hydrogen's 65,536, which is the
-// streaming hop itself and must pass.
+// Carbon's non-streaming hop, and Hydrogen's and Neon's 65,536, which is
+// the streaming hop itself and must pass.
 func TestGoogleGemini4RejectsUnsupportedContinuationBudget(t *testing.T) {
 	for _, tc := range []struct {
 		id       string
@@ -669,6 +675,7 @@ func TestGoogleGemini4RejectsUnsupportedContinuationBudget(t *testing.T) {
 		{"gemini-4-argon", 32768},
 		{"gemini-4-carbon", 32768},
 		{"gemini-4-hydrogen", 65536},
+		{"gemini-4-neon", 65536},
 	} {
 		t.Run(tc.id, func(t *testing.T) { testGemini4ContinuationBudget(t, tc.id, tc.metadata) })
 	}

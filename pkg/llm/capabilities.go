@@ -45,7 +45,6 @@ func (m Model) SupportsStructuredOutput() bool {
 	case APIOpenAIResponses, APIOpenAICompletions:
 		id := openAISnapshotSuffix.ReplaceAllString(m.ID, "")
 		// The first general-purpose snapshots precede native structured output.
-		// o1-preview and o1-mini are distinct families and unsupported below.
 		if id != m.ID {
 			snapshot := m.ID[len(id)+1:]
 			switch id {
@@ -57,17 +56,14 @@ func (m Model) SupportsStructuredOutput() bool {
 				if snapshot < "2024-07-18" {
 					return false
 				}
-			case "o1":
-				if snapshot < "2024-12-17" {
-					return false
-				}
 			}
 		}
 		// Native output is an independent capability, not inferred from reasoning
-		// efforts or tool-choice support.
+		// efforts or tool-choice support. Shut-down families leave this list
+		// as they leave responsesEfforts.
 		switch id {
-		case "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "gpt-4o", "gpt-4o-mini",
-			"o1", "o3", "o3-mini", "o4-mini", "gpt-5", "gpt-5-mini", "gpt-5-nano",
+		case "gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini",
+			"o3", "gpt-5", "gpt-5-mini", "gpt-5-nano",
 			"gpt-5.1", "gpt-5.2", "gpt-5.4", "gpt-5.5", "gpt-5.6", "gpt-5.6-sol",
 			"gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-sol", "gpt-6-luna", "gpt-6-astra",
 			"gpt-6.1-sol", "gpt-6.1-terra", "gpt-6.2-astra", "gpt-6.2-sol":

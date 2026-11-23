@@ -147,7 +147,10 @@ func TestResponsesCapabilitySnapshotsAndTemperature(t *testing.T) {
 			t.Errorf("%s missing documented capability", id)
 		}
 	}
-	for _, id := range []string{"text-embedding-3-small", "gpt-5.6-unknown", "gpt-5.2-pro", "gpt-5.6-sol-made-up"} {
+	// gpt-4.1-nano, o1, o3-mini and o4-mini shut down on 2026-10-23,
+	// snapshots included: https://developers.openai.com/api/docs/deprecations
+	for _, id := range []string{"text-embedding-3-small", "gpt-5.6-unknown", "gpt-5.2-pro", "gpt-5.6-sol-made-up",
+		"gpt-4.1-nano", "gpt-4.1-nano-2025-04-14", "o1", "o1-2024-12-17", "o3-mini", "o3-mini-2025-01-31", "o4-mini", "o4-mini-2025-04-16"} {
 		m := Model{ID: id, API: APIOpenAIResponses}
 		if m.SupportsToolChoice() || m.SupportsThinkingLevel(ThinkingOff) {
 			t.Errorf("%s invented capability", id)

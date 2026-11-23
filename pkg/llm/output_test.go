@@ -265,12 +265,16 @@ func TestStructuredOutputKnownFamilies(t *testing.T) {
 		api       API
 		supported bool
 	}{
-		{"o1", APIOpenAIResponses, true},
-		{"o1-2024-12-17", APIOpenAIResponses, true},
-		{"o1-2024-09-12", APIOpenAIResponses, false},
-		{"o1-preview", APIOpenAIResponses, false},
 		{"gpt-4o-2024-05-13", APIOpenAIResponses, false},
 		{"gpt-4o-2024-08-06", APIOpenAIResponses, true},
+		{"gpt-4o-mini-2024-07-18", APIOpenAIResponses, true},
+		{"o1-preview", APIOpenAIResponses, false},
+		// Shut down on 2026-10-23, snapshots included.
+		{"o1", APIOpenAIResponses, false},
+		{"o1-2024-12-17", APIOpenAIResponses, false},
+		{"o3-mini", APIOpenAIResponses, false},
+		{"o4-mini-2025-04-16", APIOpenAIResponses, false},
+		{"gpt-4.1-nano", APIOpenAICompletions, false},
 		{"claude-opus-5-5", APIAnthropicMessages, true},
 		{"claude-opus-5-99", APIAnthropicMessages, false},
 		{"claude-haiku-4-5-20251001", APIAnthropicMessages, true},

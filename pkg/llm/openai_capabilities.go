@@ -12,14 +12,17 @@ var openAISnapshotSuffix = regexp.MustCompile(`-\d{4}-\d{2}-\d{2}$`)
 // Model retrieval exposes no capability metadata. Unknown names therefore cannot
 // promise any explicit effort setting; the provider may still take its default.
 // Sources: https://developers.openai.com/api/docs/models/{model}
+// A family OpenAI shuts down leaves the table, snapshots and all:
+// gpt-4.1-nano, o1, o3-mini and o4-mini went on 2026-10-23
+// (https://developers.openai.com/api/docs/deprecations).
 func responsesEfforts(id string) []string {
 	id = openAISnapshotSuffix.ReplaceAllString(id, "")
 	switch id {
-	case "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "gpt-4o", "gpt-4o-mini":
+	case "gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini":
 		return []string{"off"} // Non-reasoning models take no reasoning parameter.
 	case "gpt-5", "gpt-5-mini", "gpt-5-nano":
 		return []string{"minimal", "low", "medium", "high"}
-	case "o1", "o3", "o3-mini", "o4-mini":
+	case "o3":
 		return []string{"low", "medium", "high"}
 	case "gpt-5.1":
 		return []string{"none", "low", "medium", "high"}

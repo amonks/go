@@ -21,6 +21,7 @@ type googleModel struct {
 var (
 	geminiMinimalToHigh = []ThinkingLevel{ThinkingMinimal, ThinkingLow, ThinkingMedium, ThinkingHigh}
 	geminiLowToHigh     = []ThinkingLevel{ThinkingLow, ThinkingMedium, ThinkingHigh}
+	geminiLowToXHigh    = []ThinkingLevel{ThinkingLow, ThinkingMedium, ThinkingHigh, ThinkingXHigh}
 )
 
 // gemini4Hop is every Gemini 4 model's streaming hop:
@@ -53,9 +54,11 @@ var googleModels = map[string]googleModel{
 	"gemini-3.8-flash":                   {levels: geminiLowToHigh},
 	"gemini-4-argon":                     {levels: geminiLowToHigh, longDecodeHop: gemini4Hop},
 	"gemini-4-carbon":                    {levels: geminiLowToHigh, longDecodeHop: gemini4Hop},
-	// The first Gemini to add xhigh:
+	// The Geminis that add xhigh:
 	// https://ai.google.dev/gemini-api/docs/whats-new-gemini-4-hydrogen
-	"gemini-4-hydrogen": {levels: []ThinkingLevel{ThinkingLow, ThinkingMedium, ThinkingHigh, ThinkingXHigh}, longDecodeHop: gemini4Hop},
+	// https://ai.google.dev/gemini-api/docs/whats-new-gemini-4-neon
+	"gemini-4-hydrogen": {levels: geminiLowToXHigh, longDecodeHop: gemini4Hop},
+	"gemini-4-neon":     {levels: geminiLowToXHigh, longDecodeHop: gemini4Hop},
 }
 
 func googleThinkingLevels(id string) []ThinkingLevel { return googleModels[id].levels }
