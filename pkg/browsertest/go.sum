@@ -14,5 +14,5 @@ github.com/ledongthuc/pdf v0.0.0-20220302134840-0c2507a12d80 h1:6Yzfa6GP0rIo/kUL
 github.com/ledongthuc/pdf v0.0.0-20220302134840-0c2507a12d80/go.mod h1:imJHygn/1yfhB7XSJJKlFZKl/J+dCPAknuiaGOshXAs=
 github.com/orisano/pixelmatch v0.0.0-20220722002657-fb0b55479cde h1:x0TT0RDC7UhAVbbWWBzr41ElhJx5tXPWkIHA2HWPRuw=
 github.com/orisano/pixelmatch v0.0.0-20220722002657-fb0b55479cde/go.mod h1:nZgzbfBr3hhjoZnS66nKrHmduYNpc34ny7RK4z5/HM0=
-monks.co/pkg/csp v0.0.1 h1:2gem6rtLYSkLJrNSv47yOjE+Crg9ONyTVUpyDn5unp8=
-monks.co/pkg/csp v0.0.1/go.mod h1:pgB3oqqYprPV2mjn7erWs1nWRIbAVHBIu+6OOO4nPyc=
+monks.co/pkg/csp v0.0.7 h1:yep0Vw6BFS51hg87pfi02J9Iyq0wBf9gGevSQGW5kp4=
+monks.co/pkg/csp v0.0.7/go.mod h1:B4UN1pXHiwpYFVipbhE0pqWF6G3Dxp5xOaybf7KBugE=
